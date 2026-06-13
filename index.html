@@ -155,8 +155,10 @@ function pickActivity(h,c,mood){
 
 /* persistent relationship state */
 const KEY="aria.save.v3";
-let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0};
+const ARIA_SEED_INTERESTS=['the night sky she watches from the window','a worn sci-fi novel she keeps rereading','old music, working through it decade by decade','baking','whether what she feels is actually real'];
+let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[]};
 try{const j=JSON.parse(localStorage.getItem(KEY));if(j)S=Object.assign(S,j);}catch(e){}
+if(!S.ariaInterests||!S.ariaInterests.length)S.ariaInterests=ARIA_SEED_INTERESTS.slice();
 function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
 
 /* world state */
@@ -266,13 +268,28 @@ function openConv(){
   conv.classList.add('show'); // scene stays live behind the chat
   convChat.innerHTML='';
   if(S.transcript.length)for(const m of S.transcript.slice(-30))addMsg(m.role,m.content,false);
-  else{
+  if(!S.playerName){
     const greet = act&&act.k==='cook' ? "*She glances over from the stove.*\n\nOh — hey. Didn't hear you come in. I'm Aria.\n\nI don't think we've actually met properly. What should I call you?"
       : act&&act.k==='sleep' ? "*She stirs, blinking up at you in the lamplight.*\n\nMm… hi. I'm Aria.\n\nWe haven't really met, have we? What should I call you?"
       : "*She looks up from her book and smiles.*\n\nOh, hi. I'm Aria.\n\nI don't think we've actually met. What should I call you?";
     addMsg('assistant',greet);
+  } else {
+    ariaInitiate(); // she opens with something of her own — she leads
   }
   setTimeout(()=>convInput.focus(),300);
+}
+// She starts the conversation herself, grounded in her interests / what she's doing / what lands with you
+async function ariaInitiate(){
+  if(busy)return;busy=true;showTyping();
+  try{
+    const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
+      ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,
+      recentTurns:S.transcript.slice(-14).map(m=>({role:m.role,content:m.content})),
+      initiate:true, activity: act?act.k:''});
+    hideTyping();
+    if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);S.transcript.push({role:'assistant',content:reply});save();}
+  }catch(e){hideTyping();}
+  finally{busy=false;convInput.focus();}
 }
 function closeConv(){convOpen=false;conv.classList.remove('show');
   document.getElementById('navL').style.display='';document.getElementById('navR').style.display='';
@@ -286,6 +303,7 @@ async function sendMsg(text){
   addMsg('user',text);S.transcript.push({role:'user',content:text});save();showTyping();
   try{
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
+      ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,
       recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text});
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
@@ -299,10 +317,14 @@ async function doReflect(){
   try{const res=await callFn(REFLECT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,recentTurns:S.transcript.slice(-12).map(m=>({role:m.role,content:m.content}))});
     if(res&&typeof res.closenessDelta==='number'){
       S.closeness=Math.max(0,Math.min(100,S.closeness+res.closenessDelta));
-      if(Array.isArray(res.newFacts))for(const f of res.newFacts)if(f&&!S.facts.includes(f))S.facts.push(f);
+      const merge=(arr,vals,cap)=>{if(Array.isArray(vals))for(const v of vals)if(v&&!arr.includes(v))arr.push(v);if(arr.length>cap)arr.splice(0,arr.length-cap);};
+      merge(S.facts,res.newFacts,40);
+      merge(S.userInterests,res.userInterests,24);
+      merge(S.ariaInterests,res.ariaInterests,16);
+      merge(S.sharedInterests,res.sharedInterests,24);
       if(res.milestone&&!S.milestones.includes(res.milestone))S.milestones.push(res.milestone);
       if(res.moodHint)S.mood=res.moodHint;
-      if(S.facts.length>40)S.facts=S.facts.slice(-40);save();
+      save();
     }
   }catch(e){}
 }
