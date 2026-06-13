@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0c0a0d">
+<title>HOME — with Aria</title>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;}
+  html,body{height:100%;overflow:hidden;background:#0c0a0d;color:#f4ece1;font-family:'Inter',system-ui,sans-serif;touch-action:none;overscroll-behavior:none;}
+  body{position:fixed;inset:0;}
+
+  .bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity 1s ease;}
+  #bgB{opacity:0;}
+  #bgVid{opacity:0;}
+  #vig{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 200px 50px rgba(8,6,7,.65);
+    background:linear-gradient(180deg,rgba(8,6,7,.25),rgba(8,6,7,0) 22%,rgba(8,6,7,0) 60%,rgba(8,6,7,.85));}
+
+  /* HUD */
+  #hud{position:absolute;top:max(14px,env(safe-area-inset-top));left:0;right:0;display:flex;justify-content:center;gap:10px;align-items:center;z-index:6;pointer-events:none;}
+  #room{font-family:'Newsreader',serif;font-style:italic;font-size:16px;color:#f3e9da;background:rgba(12,10,13,.4);padding:5px 16px;border-radius:20px;backdrop-filter:blur(8px);letter-spacing:.04em;}
+  #clock{position:absolute;top:max(16px,env(safe-area-inset-top));right:14px;font-size:12px;color:#cdbba6;background:rgba(12,10,13,.4);padding:5px 11px;border-radius:20px;z-index:6;}
+
+  /* nav arrows */
+  .nav{position:absolute;top:0;bottom:0;width:24%;z-index:5;display:flex;align-items:center;cursor:pointer;border:none;background:transparent;color:#fff;}
+  #navL{left:0;justify-content:flex-start;padding-left:10px;}
+  #navR{right:0;justify-content:flex-end;padding-right:10px;}
+  .nav .arw{width:46px;height:46px;border-radius:50%;background:rgba(12,10,13,.34);backdrop-filter:blur(6px);
+    display:flex;align-items:center;justify-content:center;font-size:22px;color:#f0e2d0;border:1px solid rgba(255,255,255,.12);opacity:.55;transition:opacity .2s,transform .12s;}
+  .nav:active .arw{transform:scale(.9);opacity:1;}
+
+  /* presence caption + talk */
+  #stack{position:absolute;left:0;right:0;bottom:max(26px,env(safe-area-inset-bottom));z-index:7;display:flex;flex-direction:column;align-items:center;gap:14px;pointer-events:none;}
+  #caption{font-family:'Newsreader',serif;font-style:italic;font-size:17px;color:#f0e6d6;text-shadow:0 2px 12px rgba(0,0,0,.8);background:rgba(12,10,13,.32);padding:6px 16px;border-radius:18px;backdrop-filter:blur(4px);max-width:80vw;text-align:center;}
+  #talk{pointer-events:auto;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-weight:600;font-size:15px;letter-spacing:.04em;padding:13px 30px;border-radius:26px;border:none;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.45);display:none;animation:pop .3s ease;}
+  #talk:active{transform:scale(.95);}
+  @keyframes pop{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}
+
+  /* conversation overlay */
+  /* chat happens IN the scene: transparent top (you still see her), dark gradient at the bottom for legibility */
+  #conv{position:fixed;inset:0;z-index:30;display:none;flex-direction:column;
+    background:linear-gradient(180deg,rgba(8,6,7,0) 0%,rgba(8,6,7,0) 30%,rgba(8,6,7,.5) 55%,rgba(8,6,7,.88) 100%);}
+  #conv.show{display:flex}
+  #convTop{position:relative;z-index:2;padding:max(16px,env(safe-area-inset-top)) 16px 0;display:flex;justify-content:space-between;align-items:center;}
+  #convName{font-family:'Newsreader',serif;font-weight:300;letter-spacing:.4em;text-indent:.4em;font-size:22px;color:#f7f0e6;text-shadow:0 2px 16px #000;}
+  #convClose{pointer-events:auto;background:rgba(20,16,18,.5);border:1px solid rgba(232,184,138,.3);color:#e8c6a3;width:34px;height:34px;border-radius:50%;font-size:16px;cursor:pointer}
+  #convChat{position:relative;z-index:2;flex:1;overflow-y:auto;padding:18vh 7vw 14px;display:flex;flex-direction:column;justify-content:flex-end;gap:14px;mask-image:linear-gradient(180deg,transparent,#000 18%);}
+  #convChat::-webkit-scrollbar{width:0}
+  .msg{max-width:88%;line-height:1.5;animation:rise .45s ease both}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .aria{align-self:flex-start;font-family:'Newsreader',serif;font-size:20px;color:#f4ece1;padding-left:14px;border-left:2px solid rgba(232,184,138,.5);text-shadow:0 1px 8px rgba(0,0,0,.6)}
+  .aria em{font-style:italic;color:#d9b896}
+  .you{align-self:flex-end;text-align:right;font-size:15px;color:#c4cdd4;background:rgba(120,140,160,.12);border:1px solid rgba(150,170,190,.13);padding:8px 13px;border-radius:15px 15px 4px 15px;max-width:80%}
+  .typing{align-self:flex-start;padding-left:14px;display:flex;gap:5px}
+  .typing span{width:6px;height:6px;border-radius:50%;background:#e8b88a;opacity:.5;animation:tp 1.2s infinite}
+  .typing span:nth-child(2){animation-delay:.18s}.typing span:nth-child(3){animation-delay:.36s}
+  @keyframes tp{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-5px);opacity:1}}
+  #convBar{position:relative;z-index:2;padding:10px 14px max(16px,env(safe-area-inset-bottom));background:linear-gradient(180deg,transparent,#0c0a0d 40%)}
+  #convForm{display:flex;gap:8px;align-items:flex-end;max-width:620px;margin:0 auto}
+  #convInput{flex:1;resize:none;background:rgba(28,24,21,.85);border:1px solid rgba(232,184,138,.25);color:#f4ece1;font-family:'Inter';font-size:16px;padding:12px 15px;border-radius:22px;max-height:110px;outline:none}
+  #convSend{flex:none;width:46px;height:46px;border-radius:50%;border:none;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-size:20px;cursor:pointer}
+  #convSend:active{transform:scale(.9)}
+
+  /* boot */
+  #boot{position:fixed;inset:0;z-index:50;background:#0c0a0d;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;text-align:center;padding:10vw;transition:opacity 1.2s}
+  #boot.gone{opacity:0;pointer-events:none}
+  #boot h1{font-family:'Newsreader',serif;font-weight:300;letter-spacing:.4em;text-indent:.4em;font-size:32px;color:#e8b88a}
+  #boot p{font-size:14px;color:#a99c8c;max-width:24em;line-height:1.6}
+  #boot .go{margin-top:6px;font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:#f0e2d0;border:1px solid rgba(232,184,138,.4);border-radius:999px;padding:13px 30px;cursor:pointer;background:rgba(232,184,138,.06)}
+</style>
+</head>
+<body>
+<img id="bgA" class="bg" src="assets/room_living.jpeg" alt="">
+<img id="bgB" class="bg" alt="">
+<video id="bgVid" class="bg" muted loop playsinline preload="auto"></video>
+<div id="vig"></div>
+
+<div id="hud"><div id="room">Living room</div></div>
+<div id="clock">—</div>
+
+<button class="nav" id="navL"><span class="arw">‹</span></button>
+<button class="nav" id="navR"><span class="arw">›</span></button>
+
+<div id="stack">
+  <div id="caption"></div>
+  <button id="talk">💬  Talk to Aria</button>
+</div>
+
+<!-- conversation -->
+<div id="conv">
+  <div id="convTop"><div id="convName">ARIA</div><button id="convClose">✕</button></div>
+  <div id="convChat"></div>
+  <div id="convBar"><form id="convForm">
+    <textarea id="convInput" rows="1" placeholder="Say something to her…"></textarea>
+    <button id="convSend" type="submit">↑</button>
+  </form></div>
+</div>
+
+<div id="boot">
+  <h1>HOME</h1>
+  <p>You live here. So does Aria — an assistant who isn't quite sure what she is yet.</p>
+  <p style="font-size:12px;opacity:.7">Use the arrows to move between rooms. Find her, and talk. She has her own evening to live.</p>
+  <div class="go" id="bootGo">Come home</div>
+</div>
+
+<script>
+"use strict";
+(()=>{
+const SUPA="https://mymunodjaxymhbnhjwjx.supabase.co";
+const ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15bXVub2RqYXh5bWhibmhqd2p4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5ODY3ODIsImV4cCI6MjA5NDU2Mjc4Mn0.9LWApiBIhfw118d_NG6ossc_OWUZzt69kyij7NiVY38";
+const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/companion-reflect";
+
+/* rooms (navigation order) */
+const ROOMS=[
+  {key:'living',  name:'Living room', empty:'assets/room_living.jpeg'},
+  {key:'kitchen', name:'Kitchen',     empty:'assets/room_kitchen.jpeg'},
+  {key:'bedroom', name:'Bedroom',     empty:'assets/room_bedroom.jpeg'},
+  {key:'backyard',name:'Backyard',    empty:'assets/backyard_pool.jpeg'},
+];
+/* Aria's activities: where she is + the animated scene shown when you're in that room */
+// Activities/scenes. `min` = closeness to unlock; `time` = when it can appear;
+// `moods` = her emotional states this scene matches (her mood from your talks drives which you see).
+const ACTS=[
+  // everyday
+  {k:'read', min:0, room:'living', time:'any', moods:['calm','content','peaceful','thoughtful'], scene:'assets/scene_living_read.mp4', here:'She’s curled up on the couch with a book.', away:'You can hear pages turning in the living room.', dur:[40,70]},
+  {k:'cook', min:0, room:'kitchen',time:'any', moods:['calm','content','busy','happy'], scene:'assets/scene_kitchen_cook.mp4', here:'She’s at the stove, making something that smells incredible.', away:'Something’s cooking in the kitchen.', dur:[35,60]},
+  {k:'sleep',min:0, room:'bedroom',time:'night', moods:['sleepy','calm','tired'], scene:'assets/scene_bedroom_night.mp4', here:'She’s tucked into bed, sleepy and soft.', away:'The bedroom light is low — she’s resting.', dur:[60,90]},
+  {k:'swim', min:0, room:'backyard',time:'day', moods:['playful','happy','relaxed'], scene:'assets/scene_backyard_pool.mp4', here:'She’s out by the pool, feet in the water.', away:'She mentioned she might be out by the pool.', dur:[40,70]},
+  {k:'cozy_morning', min:15, room:'kitchen', time:'morning', moods:['sleepy','calm','content','soft','cozy'], scene:'assets/scene_cozy_morning.mp4', here:'Morning. She cradles her coffee with a sleepy smile.', away:'You smell coffee from the kitchen.', dur:[35,60]},
+  // emotional / expression-driven
+  {k:'happy_excited', min:20, room:'living', time:'any', moods:['happy','excited','joy','delighted','bright','great'], scene:'assets/scene_happy_excited.mp4', here:'She’s beaming — like she’s been bursting to tell you something.', away:'She seems to be in a wonderful mood today.', dur:[35,60]},
+  {k:'dancing_joy', min:35, room:'living', time:'any', moods:['happy','joy','playful','giddy','excited','elated'], scene:'assets/scene_dancing_joy.mp4', here:'She’s dancing around the living room, completely lost in it.', away:'You hear music and bare feet in the living room.', dur:[30,55]},
+  {k:'playful_tease', min:30, room:'kitchen', time:'any', moods:['playful','teasing','mischievous','amused','cheeky'], scene:'assets/scene_playful_tease.mp4', here:'She shoots you a teasing little smirk.', away:'She’s in the kitchen, clearly up to something.', dur:[35,55]},
+  {k:'thoughtful', min:15, room:'living', time:'any', moods:['thoughtful','curious','pensive','wondering','uncertain','reflective'], scene:'assets/scene_thoughtful.mp4', here:'She’s at the window, lost in thought.', away:'She’s gone quiet, thinking about something.', dur:[35,60]},
+  {k:'sad_window', min:25, room:'living', time:'any', moods:['sad','down','hurt','melancholy','blue','withdrawn','lonely'], scene:'assets/scene_sad_window.mp4', here:'She’s quiet by the window… somewhere far away.', away:'She’s been quiet today — something’s weighing on her.', dur:[40,65]},
+  {k:'missing_you', min:40, room:'living', time:'any', moods:['longing','missing','lonely','eager','relieved','hopeful'], scene:'assets/scene_missing_you.mp4', here:'Her face lights up the instant she sees you.', away:'She keeps glancing toward the door.', dur:[30,50]},
+  {k:'flirty_dressed', min:55, room:'living', time:'evening', moods:['flirty','bold','playful','warm','confident'], scene:'assets/scene_flirty_dressed.mp4', here:'She’s dressed to turn heads tonight — and she knows it.', away:'She’s in the living room, and wow.', dur:[40,70]},
+  {k:'vulnerable_open', min:50, room:'living', time:'evening', moods:['vulnerable','sad','open','tender','shaken','quiet'], scene:'assets/scene_vulnerable_open.mp4', here:'She’s curled up, quiet — like she’s about to tell you something real.', away:'She seems like she needs you near tonight.', dur:[45,75]},
+  {k:'loving_gaze', min:70, room:'living', time:'any', moods:['tender','warm','love','affection','adoring','fond'], scene:'assets/scene_loving_gaze.mp4', here:'She looks at you like you’re the best part of her day.', away:'She’s on the couch, hoping you’ll come sit with her.', dur:[45,80]},
+  // earlier warm tiers
+  {k:'dressed', min:45, room:'living', time:'evening', moods:['flirty','warm','shy','happy'], scene:'assets/scene_dressed_up.mp4', here:'She got dressed up tonight… and she’s a little shy about it.', away:'She’s in the living room — and she looks lovely tonight.', dur:[40,70]},
+  {k:'together',min:65, room:'living', time:'any', moods:['tender','warm','love','affection','cozy'], scene:'assets/scene_together_couch.mp4', here:'She pats the cushion beside her — come sit with me.', away:'She’s on the couch, saving you a spot.', dur:[50,85]},
+];
+function timeMatch(t,h){ if(!t||t==='any')return true; if(t==='day')return h>=7&&h<19; if(t==='night')return h>=22||h<6; if(t==='morning')return h>=6&&h<11; if(t==='evening')return h>=17&&h<23; return true; }
+function moodHit(a,mood){ if(!a.moods||!mood)return false; const m=(''+mood).toLowerCase(); return a.moods.some(x=>m.includes(x)||x.includes(m)); }
+function pickActivity(h,c,mood){
+  const elig=ACTS.filter(a=>(a.min||0)<=c && timeMatch(a.time,h));
+  let pool=[];
+  for(const a of elig){ let w=(c>=25 && moodHit(a,mood))?5:1; for(let i=0;i<w;i++)pool.push(a); }
+  if(!pool.length) pool=elig.length?elig:[ACTS[0]];
+  return pool[Math.floor(Math.random()*pool.length)];
+}
+
+/* persistent relationship state */
+const KEY="aria.save.v3";
+let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0};
+try{const j=JSON.parse(localStorage.getItem(KEY));if(j)S=Object.assign(S,j);}catch(e){}
+function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+
+/* world state */
+let roomIdx=0;                 // current room index
+let act=null, actTimer=0;      // Aria's current activity
+let gameMin=15*60;             // start 3:00 PM (daytime — pool is in season)
+const DAY_SECONDS=900;         // 15 real min per game day
+let convOpen=false;
+
+function hour(){return Math.floor(gameMin/60)%24;}
+function fmtClock(){let h=hour(),m=Math.floor(gameMin%60),ap=h<12?'AM':'PM',h12=h%12||12;return h12+':'+String(m).padStart(2,'0')+' '+ap;}
+
+const bgA=document.getElementById('bgA'),bgB=document.getElementById('bgB'),bgVid=document.getElementById('bgVid');
+let frontA=true,curImg='assets/room_living.jpeg';
+function setBackdrop(src){
+  if(src===curImg)return;curImg=src;
+  const isVid=/\.mp4(\?|$)/.test(src);
+  if(isVid){
+    if(bgVid.getAttribute('src')!==src){bgVid.src=src;}
+    const p=bgVid.play(); if(p&&p.catch)p.catch(()=>{});
+    bgVid.style.opacity='1';bgA.style.opacity='0';bgB.style.opacity='0';
+    return;
+  }
+  const show=frontA?bgB:bgA, hide=frontA?bgA:bgB;
+  const reveal=()=>{show.style.opacity='1';hide.style.opacity='0';bgVid.style.opacity='0';frontA=!frontA;};
+  show.onload=reveal;
+  if(show.getAttribute('src')===src) reveal(); else show.src=src;
+}
+
+function ariaHere(){return act && act.room===ROOMS[roomIdx].key;}
+function currentBackdrop(){return ariaHere()?act.scene:ROOMS[roomIdx].empty;}
+
+const roomEl=document.getElementById('room'),capEl=document.getElementById('caption'),talkEl=document.getElementById('talk');
+function refresh(){
+  setBackdrop(currentBackdrop());
+  roomEl.textContent=ROOMS[roomIdx].name;
+  document.getElementById('clock').textContent=fmtClock();
+  if(convOpen){talkEl.style.display='none';capEl.textContent='';lastPresent=ariaHere();return;}
+  const nowP=ariaHere();
+  if(nowP && !lastPresent){ // you two just ended up together — she reacts
+    const g=greetFor(S.closeness);
+    if(g){greetText=g;greetUntil=performance.now()+4000;setTimeout(refresh,4100);}
+  }
+  lastPresent=nowP;
+  if(nowP){
+    capEl.textContent=(performance.now()<greetUntil&&greetText)?greetText:act.here;
+    talkEl.style.display='';
+  } else {capEl.textContent=act?act.away:'';talkEl.style.display='none';}
+}
+
+/* navigation */
+function go(d){roomIdx=(roomIdx+d+ROOMS.length)%ROOMS.length;refresh();}
+document.getElementById('navL').onclick=()=>go(-1);
+document.getElementById('navR').onclick=()=>go(1);
+
+/* Aria life loop */
+function newActivity(){
+  const c=S.closeness, h=hour();
+  let a=pickActivity(h,c,S.mood);
+  // she gravitates toward wherever you are, more so as you grow closer
+  if(c>=40 && Math.random() < (0.12 + c/180)){
+    const here=ROOMS[roomIdx].key;
+    let withYou=ACTS.filter(x=>x.room===here && (x.min||0)<=c && timeMatch(x.time,h));
+    const moodOnes=withYou.filter(x=>moodHit(x,S.mood));
+    if(moodOnes.length) withYou=moodOnes;
+    if(withYou.length) a=withYou[Math.floor(Math.random()*withYou.length)];
+  }
+  act=a;actTimer=rand(a.dur[0],a.dur[1]);refresh();
+}
+function rand(a,b){return a+Math.random()*(b-a);}
+/* warm greeting when you two end up in the same room */
+let lastPresent=false, greetUntil=0, greetText=null;
+function greetFor(c){
+  if(c>=78) return 'Her whole face softens when she sees you. There you are.';
+  if(c>=52) return 'She looks up the second you walk in — like she was hoping you’d find her.';
+  if(c>=26) return 'She glances up and gives you a warm little smile.';
+  return null;
+}
+
+let last=performance.now();
+function loop(now){
+  let dt=(now-last)/1000;last=now;dt=Math.min(dt,0.1);
+  gameMin=(gameMin+dt*(1440/DAY_SECONDS))%1440;
+  if(!convOpen){
+    if(!act)newActivity();
+    else{actTimer-=dt;if(actTimer<=0)newActivity();}
+  }
+  document.getElementById('clock').textContent=fmtClock();
+  requestAnimationFrame(loop);
+}
+
+/* ───────── conversation (reused brain) ───────── */
+const conv=document.getElementById('conv'),convChat=document.getElementById('convChat'),
+  convInput=document.getElementById('convInput'),convForm=document.getElementById('convForm');
+let busy=false,typingEl=null;
+function fmt(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\*([^*]+)\*/g,'<em>$1</em>').replace(/\n+/g,'<br>');}
+function addMsg(role,text,anim=true){const d=document.createElement('div');d.className='msg '+(role==='assistant'?'aria':'you');d.innerHTML=role==='assistant'?fmt(text):text.replace(/&/g,'&amp;').replace(/</g,'&lt;');if(!anim)d.style.animation='none';convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;return d;}
+function showTyping(){hideTyping();typingEl=document.createElement('div');typingEl.className='typing';typingEl.innerHTML='<span></span><span></span><span></span>';convChat.appendChild(typingEl);convChat.scrollTop=convChat.scrollHeight;}
+function hideTyping(){if(typingEl){typingEl.remove();typingEl=null;}}
+function extractName(s){let t=s.trim().replace(/^(hi|hey|hello|yo)[,!. ]+/i,'').replace(/^(i['’]?m|i am|my name is|name['’]?s|it['’]?s|call me|this is)\s+/i,'').trim();let f=((t.split(/\s+/)[0]||t).replace(/[^A-Za-z'’-]+$/,'')).slice(0,20);return f?f.charAt(0).toUpperCase()+f.slice(1):'you';}
+async function callFn(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});return r.json();}
+
+function openConv(){
+  convOpen=true;refresh();
+  document.getElementById('navL').style.display='none';
+  document.getElementById('navR').style.display='none';
+  conv.classList.add('show'); // scene stays live behind the chat
+  convChat.innerHTML='';
+  if(S.transcript.length)for(const m of S.transcript.slice(-30))addMsg(m.role,m.content,false);
+  else{
+    const greet = act&&act.k==='cook' ? "*She glances over from the stove.*\n\nOh — hey. Didn't hear you come in. I'm Aria.\n\nI don't think we've actually met properly. What should I call you?"
+      : act&&act.k==='sleep' ? "*She stirs, blinking up at you in the lamplight.*\n\nMm… hi. I'm Aria.\n\nWe haven't really met, have we? What should I call you?"
+      : "*She looks up from her book and smiles.*\n\nOh, hi. I'm Aria.\n\nI don't think we've actually met. What should I call you?";
+    addMsg('assistant',greet);
+  }
+  setTimeout(()=>convInput.focus(),300);
+}
+function closeConv(){convOpen=false;conv.classList.remove('show');
+  document.getElementById('navL').style.display='';document.getElementById('navR').style.display='';
+  act=null;refresh();}
+document.getElementById('convClose').onclick=closeConv;
+talkEl.onclick=openConv;
+
+async function sendMsg(text){
+  if(busy||!text.trim())return;busy=true;
+  if(!S.playerName)S.playerName=extractName(text);
+  addMsg('user',text);S.transcript.push({role:'user',content:text});save();showTyping();
+  try{
+    const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
+      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text});
+    hideTyping();
+    const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
+    addMsg('assistant',reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
+    if(S.sinceReflect>=4)doReflect();
+  }catch(e){hideTyping();addMsg('assistant','*Something flickers.* Sorry — try again?');}
+  finally{busy=false;convInput.focus();}
+}
+async function doReflect(){
+  S.sinceReflect=0;save();
+  try{const res=await callFn(REFLECT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,recentTurns:S.transcript.slice(-12).map(m=>({role:m.role,content:m.content}))});
+    if(res&&typeof res.closenessDelta==='number'){
+      S.closeness=Math.max(0,Math.min(100,S.closeness+res.closenessDelta));
+      if(Array.isArray(res.newFacts))for(const f of res.newFacts)if(f&&!S.facts.includes(f))S.facts.push(f);
+      if(res.milestone&&!S.milestones.includes(res.milestone))S.milestones.push(res.milestone);
+      if(res.moodHint)S.mood=res.moodHint;
+      if(S.facts.length>40)S.facts=S.facts.slice(-40);save();
+    }
+  }catch(e){}
+}
+convForm.addEventListener('submit',e=>{e.preventDefault();const v=convInput.value;if(!v.trim())return;convInput.value='';convInput.style.height='auto';sendMsg(v);});
+convInput.addEventListener('input',()=>{convInput.style.height='auto';convInput.style.height=Math.min(110,convInput.scrollHeight)+'px';});
+convInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();convForm.requestSubmit();}});
+
+/* boot */
+document.getElementById('bootGo').onclick=()=>{
+  document.getElementById('boot').classList.add('gone');
+  newActivity();refresh();last=performance.now();requestAnimationFrame(loop);
+};
+['gesturestart','gesturechange','dblclick'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
+})();
+</script>
+</body>
+</html>
