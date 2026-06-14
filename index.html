@@ -134,6 +134,10 @@
 const SUPA="https://mymunodjaxymhbnhjwjx.supabase.co";
 const ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15bXVub2RqYXh5bWhibmhqd2p4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5ODY3ODIsImV4cCI6MjA5NDU2Mjc4Mn0.9LWApiBIhfw118d_NG6ossc_OWUZzt69kyij7NiVY38";
 const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/companion-reflect";
+const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
+// stable per-device id so her save persists server-side (and can restore on a new browser/phone)
+let CLIENT_ID=null;
+try{ CLIENT_ID=localStorage.getItem("aria.client_id"); if(!CLIENT_ID){ CLIENT_ID=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():(Date.now().toString(36)+Math.random().toString(36).slice(2)); localStorage.setItem("aria.client_id",CLIENT_ID); } }catch(e){}
 
 /* rooms (navigation order) */
 const ROOMS=[
@@ -194,11 +198,43 @@ const ARIA_SEED_INTERESTS=['the night sky she watches from the window','a worn s
 let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0,selfModel:'',journal:[],nickname:''};
 try{const j=JSON.parse(localStorage.getItem(KEY));if(j)S=Object.assign(S,j);}catch(e){}
 if(!S.ariaInterests||!S.ariaInterests.length)S.ariaInterests=ARIA_SEED_INTERESTS.slice();
-function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);S.savedAt=Date.now();localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}cloudPush();}
 // how long since you two last talked — so she can notice gaps across days
 let awayFor=null;
 if(S.lastSeen){ const h=(Date.now()-S.lastSeen)/3600000; awayFor = h<0.5?null : h<12?'earlier today' : h<40?'yesterday' : h<168?(Math.round(h/24)+' days ago') : 'over a week ago'; }
 function markSeen(){ S.lastSeen=Date.now(); save(); }
+
+/* ── server-side persistence (so she's not trapped in one browser) ── */
+let _cloudTimer=null;
+function cloudPush(){
+  if(!CLIENT_ID)return;
+  clearTimeout(_cloudTimer);
+  _cloudTimer=setTimeout(()=>{
+    try{ fetch(SAVE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({clientId:CLIENT_ID,save:S})}).catch(()=>{}); }catch(e){}
+  },1200);
+}
+// On boot: pull her server save. Newer copy wins; a fresh browser adopts the cloud (cross-device
+// restore); if the cloud is empty we migrate whatever's local so nothing established is ever lost.
+async function cloudLoadAndReconcile(){
+  if(!CLIENT_ID)return;
+  try{
+    const r=await fetch(LOAD_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({clientId:CLIENT_ID})});
+    const d=await r.json();
+    const cloud=(d&&d.save&&typeof d.save==='object')?d.save:null;
+    const haveLocal=!!localStorage.getItem(KEY);
+    if(cloud){
+      const cloudSavedAt=Number(cloud.savedAt||0), localSavedAt=Number(S.savedAt||0);
+      if(!haveLocal || cloudSavedAt>localSavedAt){
+        S=Object.assign(S,cloud);
+        if(!S.ariaInterests||!S.ariaInterests.length)S.ariaInterests=ARIA_SEED_INTERESTS.slice();
+        try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}
+        if(S.lastSeen){ const h=(Date.now()-S.lastSeen)/3600000; awayFor = h<0.5?null : h<12?'earlier today' : h<40?'yesterday' : h<168?(Math.round(h/24)+' days ago') : 'over a week ago'; }
+      }
+    } else if(haveLocal){
+      cloudPush(); // first run with this id — seed the server from her existing local save
+    }
+  }catch(e){}
+}
 
 /* world state */
 let roomIdx=0;                 // current room index
@@ -552,9 +588,11 @@ document.getElementById('openJournal').onclick=()=>{ setPanel.style.display='non
 document.getElementById('jvClose').onclick=()=>{ jv.style.display='none'; };
 
 /* boot */
-document.getElementById('bootGo').onclick=()=>{
+document.getElementById('bootGo').onclick=async ()=>{
   document.getElementById('boot').classList.add('gone');
   ensureCtx(); setEnv(ROOMS[roomIdx].key);
+  // restore her from the server before the world starts (capped so a slow network never hangs entry)
+  try{ await Promise.race([cloudLoadAndReconcile(), new Promise(r=>setTimeout(r,2500))]); }catch(e){}
   newActivity();refresh();last=performance.now();requestAnimationFrame(loop);
 };
 ['gesturestart','gesturechange','dblclick'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
