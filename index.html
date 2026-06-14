@@ -146,13 +146,14 @@ const ACTS=[
   {k:'sleep', min:0, room:'bedroom', hrs:[23,7],  moods:['sleepy','calm','tired'], scene:'assets/scene_bedroom_night.mp4', here:'She’s tucked into bed, sleeping softly.', away:'The bedroom light is low — she’s asleep.', dur:[60,90]},
   {k:'bed_ready',   min:0, room:'bedroom', hrs:[6,9], moods:['content','cheerful','fresh'], scene:'assets/scene_bed_ready.mp4', here:'She’s at the mirror, getting ready for the day.', away:'She’s getting ready in the bedroom.', dur:[28,48]},
   {k:'cozy_morning',min:0, room:'kitchen', hrs:[6,10], moods:['sleepy','calm','content','soft','cozy'], scene:'assets/scene_cozy_morning.mp4', here:'Morning. She cradles her coffee with a sleepy smile.', away:'You smell coffee from the kitchen.', dur:[35,60]},
-  {k:'living_yoga', min:0, room:'living', hrs:[7,10], moods:['calm','focused','content','fresh'], scene:'assets/scene_living_yoga.mp4', here:'She’s mid-yoga, calm and focused.', away:'She’s doing yoga in the living room.', dur:[30,55]},
+  {k:'living_yoga', min:0, room:'living', hrs:[7,11], moods:['calm','focused','content','fresh'], scenes:['assets/scene_living_yoga.mp4','assets/scene_yoga_a.mp4','assets/scene_yoga_b.mp4','assets/scene_yoga_c.mp4','assets/scene_yoga_d.mp4'], here:'She’s mid-yoga, calm and focused — her morning ritual.', away:'She’s doing her morning yoga in the living room.', dur:[30,55]},
+  {k:'morning_in', min:0, room:'living', hrs:[6,10], moods:['sleepy','calm','content','soft','cozy','fresh'], scenes:['assets/scene_morn_shorts.mp4','assets/scene_morn_sweats.mp4','assets/scene_morn_tee.mp4','assets/scene_morn_ready.mp4'], here:'She’s easing into the morning, coffee in hand.', away:'She’s up, moving slow this morning.', dur:[35,60]},
+  {k:'living_hang', min:0, room:'living', hrs:[10,22], moods:['relaxed','content','calm','playful','cozy'], scenes:['assets/scene_hang_sweater.mp4','assets/scene_hang_tea.mp4','assets/scene_hang_playful.mp4','assets/scene_hang_crop.mp4'], here:'She’s just hanging out, taking it easy.', away:'She’s lounging in the living room.', dur:[40,70]},
   {k:'yard_garden', min:0, room:'backyard', hrs:[9,17], moods:['content','cheerful','happy'], scene:'assets/scene_yard_garden.mp4', here:'She’s watering the plants, humming to herself.', away:'She’s pottering around the backyard.', dur:[30,55]},
   {k:'kitchen_baking', min:0, room:'kitchen', hrs:[10,17], moods:['happy','content','playful','cheerful'], scene:'assets/scene_kitchen_baking.mp4', here:'She’s baking — there’s flour on her cheek.', away:'Something sweet is baking in the kitchen.', dur:[35,60]},
   {k:'read', min:0, room:'living', hrs:[10,22], moods:['calm','content','peaceful','thoughtful'], scene:'assets/scene_living_read.mp4', here:'She’s curled up on the couch with a book.', away:'You can hear pages turning in the living room.', dur:[40,70]},
-  {k:'swim', min:0, room:'backyard', hrs:[11,18], moods:['playful','happy','relaxed'], scene:'assets/scene_backyard_pool.mp4', here:'She’s out by the pool, feet in the water.', away:'She mentioned she might be out by the pool.', dur:[40,70]},
+  {k:'pool', min:0, room:'backyard', hrs:[11,18], moods:['playful','happy','relaxed'], scenes:['assets/scene_backyard_pool.mp4','assets/scene_yard_swim.mp4','assets/scene_pool_red.mp4','assets/scene_pool_white.mp4','assets/scene_pool_float.mp4','assets/scene_pool_black.mp4'], here:'She’s out by the pool, soaking up the sun.', away:'She mentioned she might be out by the pool.', dur:[40,70]},
   {k:'yard_lounge', min:0, room:'backyard', hrs:[11,18], moods:['relaxed','content','calm'], scene:'assets/scene_yard_lounge.mp4', here:'She’s lounging by the pool with a book.', away:'She’s relaxing out by the pool.', dur:[40,70]},
-  {k:'yard_swim', min:0, room:'backyard', hrs:[11,18], moods:['playful','happy','relaxed'], scene:'assets/scene_yard_swim.mp4', here:'She’s in the pool, grinning up at you.', away:'She’s taking a dip in the pool.', dur:[35,60]},
   {k:'kitchen_dishes', min:0, room:'kitchen', hrs:[12,21], moods:['calm','content'], scene:'assets/scene_kitchen_dishes.mp4', here:'She’s doing the dishes, sleeves rolled up.', away:'You hear water running in the kitchen.', dur:[24,42]},
   {k:'cook', min:0, room:'kitchen', hrs:[17,21], moods:['calm','content','busy','happy'], scene:'assets/scene_kitchen_cook.mp4', here:'She’s at the stove, making something that smells incredible.', away:'Something’s cooking in the kitchen.', dur:[35,60]},
   {k:'living_tv', min:0, room:'living', hrs:[19,23.99], moods:['relaxed','content','cozy','calm'], scene:'assets/scene_living_tv.mp4', here:'She’s under a blanket, half-watching something.', away:'The TV’s murmuring in the living room.', dur:[40,70]},
@@ -185,10 +186,14 @@ function pickActivity(h,c,mood){
 /* persistent relationship state */
 const KEY="aria.save.v3";
 const ARIA_SEED_INTERESTS=['the night sky she watches from the window','a worn sci-fi novel she keeps rereading','old music, working through it decade by decade','baking','whether what she feels is actually real'];
-let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[]};
+let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0};
 try{const j=JSON.parse(localStorage.getItem(KEY));if(j)S=Object.assign(S,j);}catch(e){}
 if(!S.ariaInterests||!S.ariaInterests.length)S.ariaInterests=ARIA_SEED_INTERESTS.slice();
 function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+// how long since you two last talked — so she can notice gaps across days
+let awayFor=null;
+if(S.lastSeen){ const h=(Date.now()-S.lastSeen)/3600000; awayFor = h<0.5?null : h<12?'earlier today' : h<40?'yesterday' : h<168?(Math.round(h/24)+' days ago') : 'over a week ago'; }
+function markSeen(){ S.lastSeen=Date.now(); save(); }
 
 /* world state */
 let roomIdx=0;                 // current room index
@@ -221,7 +226,8 @@ function setBackdrop(src){
 }
 
 function ariaHere(){return act && act.room===ROOMS[roomIdx].key;}
-function currentBackdrop(){return ariaHere()?act.scene:ROOMS[roomIdx].empty;}
+let actScene=null;  // the specific scene variant chosen for the current activity
+function currentBackdrop(){return ariaHere()?(actScene||(act&&act.scene)):ROOMS[roomIdx].empty;}
 
 const roomEl=document.getElementById('room'),capEl=document.getElementById('caption'),talkEl=document.getElementById('talk');
 function refresh(){
@@ -256,7 +262,9 @@ function newActivity(){
   // she lives her own day on her own schedule — she does NOT relocate to wherever you are.
   // you go find her. (no walk-in; the scene simply changes when she moves on her own.)
   const a=pickActivity(hour(), S.closeness, S.mood);
-  act=a; actTimer=rand(a.dur[0],a.dur[1]);
+  act=a;
+  actScene = a.scenes ? a.scenes[Math.floor(Math.random()*a.scenes.length)] : a.scene;  // fresh variant each time
+  actTimer=rand(a.dur[0],a.dur[1]);
   refresh();
 }
 function rand(a,b){return a+Math.random()*(b-a);}
@@ -346,9 +354,10 @@ async function ariaInitiate(){
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
       ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,
       recentTurns:S.transcript.slice(-14).map(m=>({role:m.role,content:m.content})),
-      initiate:true, activity: act?act.k:'', localTime: localContext()});
+      initiate:true, activity: act?act.k:'', localTime: localContext(), awayFor, lastMood:S.mood});
     hideTyping();
     if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();}
+    awayFor=null; markSeen();
   }catch(e){hideTyping();}
   finally{busy=false;convInput.focus();}
 }
@@ -365,10 +374,11 @@ async function sendMsg(text){
   try{
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
       ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,
-      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text, localTime: localContext()});
+      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text, localTime: localContext(), awayFor, lastMood:S.mood});
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
+    awayFor=null; markSeen();
     if(S.sinceReflect>=4)doReflect();
   }catch(e){hideTyping();addMsg('assistant','*Something flickers.* Sorry — try again?');}
   finally{busy=false;convInput.focus();}
