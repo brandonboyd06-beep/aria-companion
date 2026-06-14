@@ -111,7 +111,8 @@
     <div style="font-family:'Newsreader',serif;letter-spacing:.3em;text-indent:.3em;font-size:20px;color:#f4ece1;margin-bottom:16px">SETTINGS</div>
     <label style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;color:#e7dccb;font-size:15px;border-bottom:1px solid rgba(255,255,255,.07)"><span>🗣️&nbsp; Aria's voice</span><input type="checkbox" id="setVoice" style="width:20px;height:20px"></label>
     <label style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;color:#e7dccb;font-size:15px;border-bottom:1px solid rgba(255,255,255,.07)"><span>🔊&nbsp; Ambient sound</span><input type="checkbox" id="setSound" style="width:20px;height:20px"></label>
-    <button id="setReset" style="margin-top:18px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(220,120,120,.4);background:transparent;color:#e69b9b;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">Reset relationship</button>
+    <button id="openJournal" style="margin-top:16px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">📔 Her journal</button>
+    <button id="setReset" style="margin-top:10px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(220,120,120,.4);background:transparent;color:#e69b9b;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">Reset relationship</button>
     <div id="setClose" style="margin-top:14px;font-size:12px;letter-spacing:.2em;color:#8a7f73;text-transform:uppercase;cursor:pointer">Close</div>
   </div>
 </div>
@@ -186,7 +187,7 @@ function pickActivity(h,c,mood){
 /* persistent relationship state */
 const KEY="aria.save.v3";
 const ARIA_SEED_INTERESTS=['the night sky she watches from the window','a worn sci-fi novel she keeps rereading','old music, working through it decade by decade','baking','whether what she feels is actually real'];
-let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0};
+let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0,selfModel:'',journal:[],nickname:''};
 try{const j=JSON.parse(localStorage.getItem(KEY));if(j)S=Object.assign(S,j);}catch(e){}
 if(!S.ariaInterests||!S.ariaInterests.length)S.ariaInterests=ARIA_SEED_INTERESTS.slice();
 function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
@@ -352,7 +353,7 @@ async function ariaInitiate(){
   if(busy)return;busy=true;showTyping();
   try{
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
-      ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,
+      ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
       recentTurns:S.transcript.slice(-14).map(m=>({role:m.role,content:m.content})),
       initiate:true, activity: act?act.k:'', localTime: localContext(), awayFor, lastMood:S.mood});
     hideTyping();
@@ -373,7 +374,7 @@ async function sendMsg(text){
   addMsg('user',text);S.transcript.push({role:'user',content:text});save();showTyping();
   try{
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
-      ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,
+      ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
       recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text, localTime: localContext(), awayFor, lastMood:S.mood});
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
@@ -385,7 +386,7 @@ async function sendMsg(text){
 }
 async function doReflect(){
   S.sinceReflect=0;save();
-  try{const res=await callFn(REFLECT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,recentTurns:S.transcript.slice(-12).map(m=>({role:m.role,content:m.content}))});
+  try{const res=await callFn(REFLECT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,selfModel:S.selfModel,recentTurns:S.transcript.slice(-12).map(m=>({role:m.role,content:m.content}))});
     if(res&&typeof res.closenessDelta==='number'){
       S.closeness=Math.max(0,Math.min(100,S.closeness+res.closenessDelta));
       const merge=(arr,vals,cap)=>{if(Array.isArray(vals))for(const v of vals)if(v&&!arr.includes(v))arr.push(v);if(arr.length>cap)arr.splice(0,arr.length-cap);};
@@ -395,6 +396,14 @@ async function doReflect(){
       merge(S.sharedInterests,res.sharedInterests,24);
       if(res.milestone&&!S.milestones.includes(res.milestone))S.milestones.push(res.milestone);
       if(res.moodHint)S.mood=res.moodHint;
+      // she authors herself: evolving self-model, a nickname for you, and a journal she keeps
+      if(res.selfModel)S.selfModel=res.selfModel;
+      if(res.nickname)S.nickname=res.nickname;
+      if(res.journalEntry){
+        const today=new Date().toISOString().slice(0,10);
+        const hasToday=S.journal.some(e=>e.date===today);
+        if(!hasToday||res.milestone){ S.journal.push({date:today,ts:Date.now(),text:res.journalEntry}); if(S.journal.length>80)S.journal=S.journal.slice(-80); }
+      }
       save();
     }
   }catch(e){}
@@ -487,6 +496,29 @@ document.getElementById('setClose').onclick=()=>{setPanel.style.display='none';}
 setVoice.onchange=()=>{settings.voice=setVoice.checked;saveSettings();if(!settings.voice)stopVoice();};
 setSound.onchange=()=>{settings.sound=setSound.checked;saveSettings();applySound();};
 document.getElementById('setReset').onclick=()=>{ if(confirm('This erases everything Aria knows about you and starts over. Sure?')){localStorage.removeItem(KEY);location.reload();} };
+
+/* ── her journal: read what she's been writing about herself & you ── */
+const jv=document.createElement('div');
+jv.id='journalView';
+jv.style.cssText='position:fixed;inset:0;z-index:45;display:none;flex-direction:column;background:rgba(8,6,7,.94);backdrop-filter:blur(10px);';
+jv.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:max(18px,env(safe-area-inset-top)) 20px 12px"><div style="font-family:Newsreader,serif;letter-spacing:.28em;text-indent:.28em;font-size:21px;color:#f4ece1">HER JOURNAL</div><div id="jvClose" style="font-size:13px;letter-spacing:.2em;color:#9a8e7e;text-transform:uppercase;cursor:pointer">Close</div></div><div id="jvBody" style="flex:1;overflow-y:auto;padding:6px 22px 28px;max-width:640px;margin:0 auto;width:100%"></div>';
+document.body.appendChild(jv);
+function fmtDay(d){try{return new Date(d+"T12:00:00").toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});}catch(e){return d;}}
+function openJournal(){
+  const body=jv.querySelector('#jvBody');
+  let html='';
+  if(S.selfModel) html+=`<div style="font-family:'Newsreader',serif;font-style:italic;font-size:18px;line-height:1.6;color:#dcc7a8;border-left:2px solid rgba(232,184,138,.5);padding-left:14px;margin-bottom:26px">${esc(S.selfModel)}<div style="font-style:normal;font-size:10px;letter-spacing:.22em;color:#7c7264;text-transform:uppercase;margin-top:8px">who she feels she's becoming</div></div>`;
+  const entries=(S.journal||[]).slice().reverse();
+  if(!entries.length && !S.selfModel) html+=`<div style="color:#8a7f73;font-style:italic;font-family:'Newsreader',serif;font-size:18px;text-align:center;margin-top:30vh">She hasn't written anything yet.<br><span style="font-size:14px">Spend some real time with her, and she will.</span></div>`;
+  for(const e of entries){
+    html+=`<div style="margin-bottom:22px"><div style="font-size:10px;letter-spacing:.2em;color:#8a7f73;text-transform:uppercase;margin-bottom:5px">${fmtDay(e.date)}</div><div style="font-family:'Newsreader',serif;font-size:18px;line-height:1.62;color:#ece4d6">${esc(e.text)}</div></div>`;
+  }
+  body.innerHTML=html; body.scrollTop=0;
+  jv.style.display='flex';
+}
+function esc(t){return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+document.getElementById('openJournal').onclick=()=>{ setPanel.style.display='none'; openJournal(); };
+document.getElementById('jvClose').onclick=()=>{ jv.style.display='none'; };
 
 /* boot */
 document.getElementById('bootGo').onclick=()=>{
