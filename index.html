@@ -98,6 +98,17 @@
   </form></div>
 </div>
 
+<button id="gear" style="position:absolute;top:max(14px,env(safe-area-inset-top));left:14px;z-index:8;width:38px;height:38px;border-radius:50%;background:rgba(20,16,18,.45);border:1px solid rgba(232,184,138,.25);color:#e8c6a3;font-size:16px;backdrop-filter:blur(6px);cursor:pointer">⚙</button>
+<div id="setPanel" style="position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;background:rgba(8,6,7,.82);backdrop-filter:blur(8px);">
+  <div style="background:rgba(20,16,18,.92);border:1px solid rgba(232,184,138,.2);border-radius:18px;padding:24px;width:min(86vw,340px);text-align:center;font-family:'Inter',sans-serif">
+    <div style="font-family:'Newsreader',serif;letter-spacing:.3em;text-indent:.3em;font-size:20px;color:#f4ece1;margin-bottom:16px">SETTINGS</div>
+    <label style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;color:#e7dccb;font-size:15px;border-bottom:1px solid rgba(255,255,255,.07)"><span>🗣️&nbsp; Aria's voice</span><input type="checkbox" id="setVoice" style="width:20px;height:20px"></label>
+    <label style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;color:#e7dccb;font-size:15px;border-bottom:1px solid rgba(255,255,255,.07)"><span>🔊&nbsp; Ambient sound</span><input type="checkbox" id="setSound" style="width:20px;height:20px"></label>
+    <button id="setReset" style="margin-top:18px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(220,120,120,.4);background:transparent;color:#e69b9b;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">Reset relationship</button>
+    <div id="setClose" style="margin-top:14px;font-size:12px;letter-spacing:.2em;color:#8a7f73;text-transform:uppercase;cursor:pointer">Close</div>
+  </div>
+</div>
+
 <div id="boot">
   <h1>HOME</h1>
   <p>You live here. So does Aria — an assistant who isn't quite sure what she is yet.</p>
@@ -291,7 +302,7 @@ async function ariaInitiate(){
       recentTurns:S.transcript.slice(-14).map(m=>({role:m.role,content:m.content})),
       initiate:true, activity: act?act.k:''});
     hideTyping();
-    if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);S.transcript.push({role:'assistant',content:reply});save();}
+    if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();}
   }catch(e){hideTyping();}
   finally{busy=false;convInput.focus();}
 }
@@ -311,7 +322,7 @@ async function sendMsg(text){
       recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text});
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
-    addMsg('assistant',reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
+    addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
     if(S.sinceReflect>=4)doReflect();
   }catch(e){hideTyping();addMsg('assistant','*Something flickers.* Sorry — try again?');}
   finally{busy=false;convInput.focus();}
@@ -336,9 +347,62 @@ convForm.addEventListener('submit',e=>{e.preventDefault();const v=convInput.valu
 convInput.addEventListener('input',()=>{convInput.style.height='auto';convInput.style.height=Math.min(110,convInput.scrollHeight)+'px';});
 convInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();convForm.requestSubmit();}});
 
+/* ───────── settings, ambient sound, voice ───────── */
+const SKEY="aria.settings.v1";
+let settings={voice:true,sound:true};
+try{const j=JSON.parse(localStorage.getItem(SKEY));if(j)settings=Object.assign(settings,j);}catch(e){}
+function saveSettings(){try{localStorage.setItem(SKEY,JSON.stringify(settings));}catch(e){}}
+
+let actx=null,ambGain=null;
+function audioStart(){
+  if(actx)return;
+  try{
+    actx=new (window.AudioContext||window.webkitAudioContext)();
+    ambGain=actx.createGain();ambGain.gain.value=0;ambGain.connect(actx.destination);
+    const lp=actx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=440;lp.connect(ambGain);
+    const og=actx.createGain();og.gain.value=0.10;og.connect(lp);
+    const o1=actx.createOscillator();o1.type='sine';o1.frequency.value=98;
+    const o2=actx.createOscillator();o2.type='sine';o2.frequency.value=147.3;
+    o1.connect(og);o2.connect(og);
+    const buf=actx.createBuffer(1,actx.sampleRate*2,actx.sampleRate);const d=buf.getChannelData(0);
+    for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*0.05;
+    const noise=actx.createBufferSource();noise.buffer=buf;noise.loop=true;
+    const nf=actx.createBiquadFilter();nf.type='bandpass';nf.frequency.value=520;nf.Q.value=0.5;
+    const ng=actx.createGain();ng.gain.value=0.05;noise.connect(nf);nf.connect(ng);ng.connect(ambGain);
+    o1.start();o2.start();noise.start();
+    applySound();
+  }catch(e){}
+}
+function applySound(){ if(actx&&ambGain) ambGain.gain.setTargetAtTime(settings.sound?0.5:0, actx.currentTime, 0.6); }
+
+let voices=[];
+function loadVoices(){ try{voices=speechSynthesis.getVoices()||[];}catch(e){} }
+if('speechSynthesis' in window){ loadVoices(); speechSynthesis.onvoiceschanged=loadVoices; }
+function pickVoice(){
+  const en=voices.filter(v=>/^en/i.test(v.lang));
+  const prefer=['Samantha','Ava','Allison','Serena','Karen','Victoria','Moira','Tessa','Google US English','Microsoft Aria','Microsoft Jenny','Zira'];
+  for(const n of prefer){const v=en.find(v=>v.name.includes(n));if(v)return v;}
+  return en.find(v=>/female/i.test(v.name))||en[0]||voices[0]||null;
+}
+function speak(text){
+  if(!settings.voice||!('speechSynthesis' in window))return;
+  const clean=String(text).replace(/\*[^*]*\*/g,' ').replace(/[_*#>`~]/g,'').replace(/\s+/g,' ').trim();
+  if(!clean)return;
+  try{ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(clean); const v=pickVoice(); if(v)u.voice=v; u.rate=0.97; u.pitch=1.06; speechSynthesis.speak(u); }catch(e){}
+}
+
+const setPanel=document.getElementById('setPanel'),setVoice=document.getElementById('setVoice'),setSound=document.getElementById('setSound');
+setVoice.checked=settings.voice; setSound.checked=settings.sound;
+document.getElementById('gear').onclick=()=>{setPanel.style.display='flex';};
+document.getElementById('setClose').onclick=()=>{setPanel.style.display='none';};
+setVoice.onchange=()=>{settings.voice=setVoice.checked;saveSettings();if(!settings.voice){try{speechSynthesis.cancel();}catch(e){}}};
+setSound.onchange=()=>{settings.sound=setSound.checked;saveSettings();applySound();};
+document.getElementById('setReset').onclick=()=>{ if(confirm('This erases everything Aria knows about you and starts over. Sure?')){localStorage.removeItem(KEY);location.reload();} };
+
 /* boot */
 document.getElementById('bootGo').onclick=()=>{
   document.getElementById('boot').classList.add('gone');
+  audioStart();
   newActivity();refresh();last=performance.now();requestAnimationFrame(loop);
 };
 ['gesturestart','gesturechange','dblclick'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
