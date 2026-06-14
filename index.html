@@ -249,23 +249,11 @@ document.getElementById('navR').onclick=()=>go(1);
 
 /* Aria life loop */
 function newActivity(){
-  const prev=act?act.room:null;
-  const c=S.closeness, h=hour();
-  let a=pickActivity(h,c,S.mood);
-  // she gravitates toward wherever you are, more so as you grow closer
-  if(c>=40 && Math.random() < (0.12 + c/180)){
-    const here=ROOMS[roomIdx].key;
-    let withYou=ACTS.filter(x=>x.room===here && (x.min||0)<=c && timeMatch(x.time,h));
-    const moodOnes=withYou.filter(x=>moodHit(x,S.mood));
-    if(moodOnes.length) withYou=moodOnes;
-    if(withYou.length) a=withYou[Math.floor(Math.random()*withYou.length)];
-  }
-  act=a;actTimer=rand(a.dur[0],a.dur[1]);
-  // if SHE moves into the room you're standing in, show her walk in
-  const entering = booted && !convOpen && a.room===ROOMS[roomIdx].key && prev!==a.room;
-  booted=true;
-  if(entering){ walking=true; walkIn(()=>{walking=false;refresh();}); }
-  else refresh();
+  // she lives her own day on her own schedule — she does NOT relocate to wherever you are.
+  // you go find her. (no walk-in; the scene simply changes when she moves on her own.)
+  const a=pickActivity(hour(), S.closeness, S.mood);
+  act=a; actTimer=rand(a.dur[0],a.dur[1]);
+  refresh();
 }
 function rand(a,b){return a+Math.random()*(b-a);}
 
