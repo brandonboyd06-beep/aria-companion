@@ -18,7 +18,8 @@
   #walkLayer .walker img{display:block;height:76vh;filter:drop-shadow(0 8px 18px rgba(0,0,0,.5));animation:bobwalk .5s ease-in-out infinite;}
   @keyframes bobwalk{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.4%)}}
   #bgB{opacity:0;}
-  #bgVid{opacity:0;}
+  #bgVid{opacity:0;animation:aliveDrift 13s ease-in-out infinite;}
+  @keyframes aliveDrift{0%,100%{transform:scale(1.0) translateY(0)}50%{transform:scale(1.02) translateY(-0.5%)}}
   #vig{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 200px 50px rgba(8,6,7,.65);
     background:linear-gradient(180deg,rgba(8,6,7,.25),rgba(8,6,7,0) 22%,rgba(8,6,7,0) 60%,rgba(8,6,7,.85));}
 
@@ -78,7 +79,7 @@
 <body>
 <img id="bgA" class="bg" src="assets/room_living.jpeg" alt="">
 <img id="bgB" class="bg" alt="">
-<video id="bgVid" class="bg" muted loop playsinline preload="auto"></video>
+<video id="bgVid" class="bg" muted playsinline preload="auto"></video>
 <div id="tod"></div>
 <div id="vig"></div>
 <div id="walkLayer"></div>
@@ -139,45 +140,45 @@ const ROOMS=[
 /* Aria's activities: where she is + the animated scene shown when you're in that room */
 // Activities/scenes. `min` = closeness to unlock; `time` = when it can appear;
 // `moods` = her emotional states this scene matches (her mood from your talks drives which you see).
+// `hrs:[from,to]` = the real-clock window this activity makes sense in (24h, wraps past midnight).
 const ACTS=[
-  // everyday
-  {k:'read', min:0, room:'living', time:'any', moods:['calm','content','peaceful','thoughtful'], scene:'assets/scene_living_read.mp4', here:'She’s curled up on the couch with a book.', away:'You can hear pages turning in the living room.', dur:[40,70]},
-  {k:'cook', min:0, room:'kitchen',time:'any', moods:['calm','content','busy','happy'], scene:'assets/scene_kitchen_cook.mp4', here:'She’s at the stove, making something that smells incredible.', away:'Something’s cooking in the kitchen.', dur:[35,60]},
-  {k:'sleep',min:0, room:'bedroom',time:'night', moods:['sleepy','calm','tired'], scene:'assets/scene_bedroom_night.mp4', here:'She’s tucked into bed, sleepy and soft.', away:'The bedroom light is low — she’s resting.', dur:[60,90]},
-  {k:'swim', min:0, room:'backyard',time:'day', moods:['playful','happy','relaxed'], scene:'assets/scene_backyard_pool.mp4', here:'She’s out by the pool, feet in the water.', away:'She mentioned she might be out by the pool.', dur:[40,70]},
-  {k:'cozy_morning', min:15, room:'kitchen', time:'morning', moods:['sleepy','calm','content','soft','cozy'], scene:'assets/scene_cozy_morning.mp4', here:'Morning. She cradles her coffee with a sleepy smile.', away:'You smell coffee from the kitchen.', dur:[35,60]},
-  // emotional / expression-driven
-  {k:'happy_excited', min:20, room:'living', time:'any', moods:['happy','excited','joy','delighted','bright','great'], scene:'assets/scene_happy_excited.mp4', here:'She’s beaming — like she’s been bursting to tell you something.', away:'She seems to be in a wonderful mood today.', dur:[35,60]},
-  {k:'dancing_joy', min:35, room:'living', time:'any', moods:['happy','joy','playful','giddy','excited','elated'], scene:'assets/scene_dancing_joy.mp4', here:'She’s dancing around the living room, completely lost in it.', away:'You hear music and bare feet in the living room.', dur:[30,55]},
-  {k:'playful_tease', min:30, room:'kitchen', time:'any', moods:['playful','teasing','mischievous','amused','cheeky'], scene:'assets/scene_playful_tease.mp4', here:'She shoots you a teasing little smirk.', away:'She’s in the kitchen, clearly up to something.', dur:[35,55]},
-  {k:'thoughtful', min:15, room:'living', time:'any', moods:['thoughtful','curious','pensive','wondering','uncertain','reflective'], scene:'assets/scene_thoughtful.mp4', here:'She’s at the window, lost in thought.', away:'She’s gone quiet, thinking about something.', dur:[35,60]},
-  {k:'sad_window', min:25, room:'living', time:'any', moods:['sad','down','hurt','melancholy','blue','withdrawn','lonely'], scene:'assets/scene_sad_window.mp4', here:'She’s quiet by the window… somewhere far away.', away:'She’s been quiet today — something’s weighing on her.', dur:[40,65]},
-  {k:'missing_you', min:40, room:'living', time:'any', moods:['longing','missing','lonely','eager','relieved','hopeful'], scene:'assets/scene_missing_you.mp4', here:'Her face lights up the instant she sees you.', away:'She keeps glancing toward the door.', dur:[30,50]},
-  {k:'flirty_dressed', min:55, room:'living', time:'evening', moods:['flirty','bold','playful','warm','confident'], scene:'assets/scene_flirty_dressed.mp4', here:'She’s dressed to turn heads tonight — and she knows it.', away:'She’s in the living room, and wow.', dur:[40,70]},
-  {k:'vulnerable_open', min:50, room:'living', time:'evening', moods:['vulnerable','sad','open','tender','shaken','quiet'], scene:'assets/scene_vulnerable_open.mp4', here:'She’s curled up, quiet — like she’s about to tell you something real.', away:'She seems like she needs you near tonight.', dur:[45,75]},
-  {k:'loving_gaze', min:70, room:'living', time:'any', moods:['tender','warm','love','affection','adoring','fond'], scene:'assets/scene_loving_gaze.mp4', here:'She looks at you like you’re the best part of her day.', away:'She’s on the couch, hoping you’ll come sit with her.', dur:[45,80]},
-  // earlier warm tiers
-  {k:'dressed', min:45, room:'living', time:'evening', moods:['flirty','warm','shy','happy'], scene:'assets/scene_dressed_up.mp4', here:'She got dressed up tonight… and she’s a little shy about it.', away:'She’s in the living room — and she looks lovely tonight.', dur:[40,70]},
-  {k:'together',min:65, room:'living', time:'any', moods:['tender','warm','love','affection','cozy'], scene:'assets/scene_together_couch.mp4', here:'She pats the cushion beside her — come sit with me.', away:'She’s on the couch, saving you a spot.', dur:[50,85]},
-  // ── more variety per room: different things she does ──
-  {k:'bed_reading', min:0, room:'bedroom', time:'any',     moods:['calm','content','cozy','peaceful'],   scene:'assets/scene_bed_reading.mp4', here:'She’s in bed with a book, lost in the story.', away:'The bedroom lamp is on — she’s reading.', dur:[40,70]},
-  {k:'bed_ready',   min:0, room:'bedroom', time:'morning', moods:['content','cheerful','fresh'],         scene:'assets/scene_bed_ready.mp4', here:'She’s at the mirror, getting ready for the day.', away:'She’s getting ready in the bedroom.', dur:[28,48]},
-  {k:'bed_journal', min:20,room:'bedroom', time:'evening', moods:['thoughtful','reflective','calm','quiet'], scene:'assets/scene_bed_journal.mp4', here:'She’s curled on the bed, writing in her journal.', away:'She’s journaling in the bedroom.', dur:[40,65]},
-  {k:'kitchen_baking', min:0, room:'kitchen', time:'any', moods:['happy','content','playful','cheerful'], scene:'assets/scene_kitchen_baking.mp4', here:'She’s baking — there’s flour on her cheek.', away:'Something sweet is baking in the kitchen.', dur:[35,60]},
-  {k:'kitchen_dishes', min:0, room:'kitchen', time:'any', moods:['calm','content'],                     scene:'assets/scene_kitchen_dishes.mp4', here:'She’s doing the dishes, sleeves rolled up.', away:'You hear water running in the kitchen.', dur:[24,42]},
-  {k:'living_tv',   min:0, room:'living', time:'evening', moods:['relaxed','content','cozy','calm'],     scene:'assets/scene_living_tv.mp4', here:'She’s under a blanket, half-watching something.', away:'The TV’s murmuring in the living room.', dur:[40,70]},
-  {k:'living_yoga', min:0, room:'living', time:'morning', moods:['calm','focused','content','fresh'],    scene:'assets/scene_living_yoga.mp4', here:'She’s mid-yoga, calm and focused.', away:'She’s doing yoga in the living room.', dur:[30,55]},
-  {k:'yard_lounge', min:0, room:'backyard', time:'day', moods:['relaxed','content','calm'],              scene:'assets/scene_yard_lounge.mp4', here:'She’s lounging by the pool with a book.', away:'She’s relaxing out by the pool.', dur:[40,70]},
-  {k:'yard_garden', min:0, room:'backyard', time:'day', moods:['content','cheerful','happy'],            scene:'assets/scene_yard_garden.mp4', here:'She’s watering the plants, humming to herself.', away:'She’s pottering around the backyard.', dur:[30,55]},
-  {k:'yard_swim',   min:0, room:'backyard', time:'day', moods:['playful','happy','relaxed'],             scene:'assets/scene_yard_swim.mp4', here:'She’s in the pool, grinning up at you.', away:'She’s taking a dip in the pool.', dur:[35,60]},
+  // daily life, scheduled to the time of day
+  {k:'sleep', min:0, room:'bedroom', hrs:[23,7],  moods:['sleepy','calm','tired'], scene:'assets/scene_bedroom_night.mp4', here:'She’s tucked into bed, sleeping softly.', away:'The bedroom light is low — she’s asleep.', dur:[60,90]},
+  {k:'bed_ready',   min:0, room:'bedroom', hrs:[6,9], moods:['content','cheerful','fresh'], scene:'assets/scene_bed_ready.mp4', here:'She’s at the mirror, getting ready for the day.', away:'She’s getting ready in the bedroom.', dur:[28,48]},
+  {k:'cozy_morning',min:0, room:'kitchen', hrs:[6,10], moods:['sleepy','calm','content','soft','cozy'], scene:'assets/scene_cozy_morning.mp4', here:'Morning. She cradles her coffee with a sleepy smile.', away:'You smell coffee from the kitchen.', dur:[35,60]},
+  {k:'living_yoga', min:0, room:'living', hrs:[7,10], moods:['calm','focused','content','fresh'], scene:'assets/scene_living_yoga.mp4', here:'She’s mid-yoga, calm and focused.', away:'She’s doing yoga in the living room.', dur:[30,55]},
+  {k:'yard_garden', min:0, room:'backyard', hrs:[9,17], moods:['content','cheerful','happy'], scene:'assets/scene_yard_garden.mp4', here:'She’s watering the plants, humming to herself.', away:'She’s pottering around the backyard.', dur:[30,55]},
+  {k:'kitchen_baking', min:0, room:'kitchen', hrs:[10,17], moods:['happy','content','playful','cheerful'], scene:'assets/scene_kitchen_baking.mp4', here:'She’s baking — there’s flour on her cheek.', away:'Something sweet is baking in the kitchen.', dur:[35,60]},
+  {k:'read', min:0, room:'living', hrs:[10,22], moods:['calm','content','peaceful','thoughtful'], scene:'assets/scene_living_read.mp4', here:'She’s curled up on the couch with a book.', away:'You can hear pages turning in the living room.', dur:[40,70]},
+  {k:'swim', min:0, room:'backyard', hrs:[11,18], moods:['playful','happy','relaxed'], scene:'assets/scene_backyard_pool.mp4', here:'She’s out by the pool, feet in the water.', away:'She mentioned she might be out by the pool.', dur:[40,70]},
+  {k:'yard_lounge', min:0, room:'backyard', hrs:[11,18], moods:['relaxed','content','calm'], scene:'assets/scene_yard_lounge.mp4', here:'She’s lounging by the pool with a book.', away:'She’s relaxing out by the pool.', dur:[40,70]},
+  {k:'yard_swim', min:0, room:'backyard', hrs:[11,18], moods:['playful','happy','relaxed'], scene:'assets/scene_yard_swim.mp4', here:'She’s in the pool, grinning up at you.', away:'She’s taking a dip in the pool.', dur:[35,60]},
+  {k:'kitchen_dishes', min:0, room:'kitchen', hrs:[12,21], moods:['calm','content'], scene:'assets/scene_kitchen_dishes.mp4', here:'She’s doing the dishes, sleeves rolled up.', away:'You hear water running in the kitchen.', dur:[24,42]},
+  {k:'cook', min:0, room:'kitchen', hrs:[17,21], moods:['calm','content','busy','happy'], scene:'assets/scene_kitchen_cook.mp4', here:'She’s at the stove, making something that smells incredible.', away:'Something’s cooking in the kitchen.', dur:[35,60]},
+  {k:'living_tv', min:0, room:'living', hrs:[19,23.99], moods:['relaxed','content','cozy','calm'], scene:'assets/scene_living_tv.mp4', here:'She’s under a blanket, half-watching something.', away:'The TV’s murmuring in the living room.', dur:[40,70]},
+  {k:'bed_reading', min:0, room:'bedroom', hrs:[20,23.99], moods:['calm','content','cozy','peaceful'], scene:'assets/scene_bed_reading.mp4', here:'She’s in bed with a book, lost in the story.', away:'The bedroom lamp is on — she’s reading.', dur:[40,70]},
+  {k:'bed_journal', min:20, room:'bedroom', hrs:[21,23.99], moods:['thoughtful','reflective','calm','quiet'], scene:'assets/scene_bed_journal.mp4', here:'She’s curled on the bed, writing in her journal.', away:'She’s journaling in the bedroom.', dur:[40,65]},
+  // mood / expression scenes — surface when her mood calls for it, within waking hours
+  {k:'happy_excited', min:20, room:'living', hrs:[8,23], moods:['happy','excited','joy','delighted','bright','great'], scene:'assets/scene_happy_excited.mp4', here:'She’s beaming — like she’s been bursting to tell you something.', away:'She seems to be in a wonderful mood.', dur:[35,60]},
+  {k:'dancing_joy', min:35, room:'living', hrs:[10,22], moods:['happy','joy','playful','giddy','excited','elated'], scene:'assets/scene_dancing_joy.mp4', here:'She’s dancing around the living room, completely lost in it.', away:'You hear music and bare feet in the living room.', dur:[30,55]},
+  {k:'playful_tease', min:30, room:'kitchen', hrs:[9,21], moods:['playful','teasing','mischievous','amused','cheeky'], scene:'assets/scene_playful_tease.mp4', here:'She shoots you a teasing little smirk.', away:'She’s in the kitchen, clearly up to something.', dur:[35,55]},
+  {k:'thoughtful', min:15, room:'living', hrs:[15,23.99], moods:['thoughtful','curious','pensive','wondering','uncertain','reflective'], scene:'assets/scene_thoughtful.mp4', here:'She’s at the window, lost in thought.', away:'She’s gone quiet, thinking about something.', dur:[35,60]},
+  {k:'sad_window', min:25, room:'living', hrs:[14,23.99], moods:['sad','down','hurt','melancholy','blue','withdrawn','lonely'], scene:'assets/scene_sad_window.mp4', here:'She’s quiet by the window… somewhere far away.', away:'She’s been quiet — something’s weighing on her.', dur:[40,65]},
+  {k:'missing_you', min:40, room:'living', hrs:[9,23], moods:['longing','missing','lonely','eager','relieved','hopeful'], scene:'assets/scene_missing_you.mp4', here:'Her face lights up the instant she sees you.', away:'She keeps glancing toward the door.', dur:[30,50]},
+  {k:'flirty_dressed', min:55, room:'living', hrs:[18,23.99], moods:['flirty','bold','playful','warm','confident'], scene:'assets/scene_flirty_dressed.mp4', here:'She’s dressed to turn heads tonight — and she knows it.', away:'She’s in the living room, and wow.', dur:[40,70]},
+  {k:'dressed', min:45, room:'living', hrs:[18,23.99], moods:['flirty','warm','shy','happy'], scene:'assets/scene_dressed_up.mp4', here:'She got dressed up tonight… and she’s a little shy about it.', away:'She’s in the living room — and she looks lovely tonight.', dur:[40,70]},
+  {k:'vulnerable_open', min:50, room:'living', hrs:[20,23.99], moods:['vulnerable','sad','open','tender','shaken','quiet'], scene:'assets/scene_vulnerable_open.mp4', here:'She’s curled up, quiet — like she’s about to tell you something real.', away:'She seems like she needs you near tonight.', dur:[45,75]},
+  {k:'loving_gaze', min:70, room:'living', hrs:[17,23.99], moods:['tender','warm','love','affection','adoring','fond'], scene:'assets/scene_loving_gaze.mp4', here:'She looks at you like you’re the best part of her day.', away:'She’s on the couch, hoping you’ll come sit with her.', dur:[45,80]},
+  {k:'together', min:65, room:'living', hrs:[18,23.99], moods:['tender','warm','love','affection','cozy'], scene:'assets/scene_together_couch.mp4', here:'She pats the cushion beside her — come sit with me.', away:'She’s on the couch, saving you a spot.', dur:[50,85]},
 ];
-function timeMatch(t,h){ if(!t||t==='any')return true; if(t==='day')return h>=7&&h<19; if(t==='night')return h>=22||h<6; if(t==='morning')return h>=6&&h<11; if(t==='evening')return h>=17&&h<23; return true; }
+function hourMatch(hrs,h){ if(!hrs)return true; const a=hrs[0],b=hrs[1]; return a<=b ? (h>=a&&h<b) : (h>=a||h<b); }
 function moodHit(a,mood){ if(!a.moods||!mood)return false; const m=(''+mood).toLowerCase(); return a.moods.some(x=>m.includes(x)||x.includes(m)); }
 function pickActivity(h,c,mood){
-  const elig=ACTS.filter(a=>(a.min||0)<=c && timeMatch(a.time,h));
+  let elig=ACTS.filter(a=>(a.min||0)<=c && hourMatch(a.hrs,h));
+  if(!elig.length) elig=ACTS.filter(a=>hourMatch(a.hrs,h)) || [];
+  if(!elig.length) return ACTS[0];
   let pool=[];
   for(const a of elig){ let w=(c>=25 && moodHit(a,mood))?5:1; for(let i=0;i<w;i++)pool.push(a); }
-  if(!pool.length) pool=elig.length?elig:[ACTS[0]];
   return pool[Math.floor(Math.random()*pool.length)];
 }
 
@@ -192,12 +193,13 @@ function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-8
 /* world state */
 let roomIdx=0;                 // current room index
 let act=null, actTimer=0;      // Aria's current activity
-let gameMin=15*60;             // start 3:00 PM (daytime — pool is in season)
-const DAY_SECONDS=900;         // 15 real min per game day
+// time is the user's REAL local time/date — the house lives in sync with you
 let convOpen=false;
 
-function hour(){return Math.floor(gameMin/60)%24;}
-function fmtClock(){let h=hour(),m=Math.floor(gameMin%60),ap=h<12?'AM':'PM',h12=h%12||12;return h12+':'+String(m).padStart(2,'0')+' '+ap;}
+function hour(){const d=new Date();return d.getHours()+d.getMinutes()/60;}
+function fmtClock(){const d=new Date();let h=d.getHours(),m=d.getMinutes(),ap=h<12?'AM':'PM',h12=h%12||12;return h12+':'+String(m).padStart(2,'0')+' '+ap;}
+function partOfDay(){const h=Math.floor(hour());return h<5?'late night':h<12?'morning':h<17?'afternoon':h<21?'evening':'night';}
+function localContext(){const d=new Date();return d.toLocaleDateString(undefined,{weekday:'long'})+' '+partOfDay()+', '+fmtClock();}
 
 const bgA=document.getElementById('bgA'),bgB=document.getElementById('bgB'),bgVid=document.getElementById('bgVid');
 let frontA=true,curImg='assets/room_living.jpeg';
@@ -206,6 +208,8 @@ function setBackdrop(src){
   const isVid=/\.mp4(\?|$)/.test(src);
   if(isVid){
     if(bgVid.getAttribute('src')!==src){bgVid.src=src;}
+    bgVid.loop=false;                       // play once, then settle on the last frame (she's looking at you)
+    try{bgVid.currentTime=0;}catch(e){}
     const p=bgVid.play(); if(p&&p.catch)p.catch(()=>{});
     bgVid.style.opacity='1';bgA.style.opacity='0';bgB.style.opacity='0';
     return;
@@ -298,7 +302,6 @@ function greetFor(c){
 let last=performance.now();
 function loop(now){
   let dt=(now-last)/1000;last=now;dt=Math.min(dt,0.1);
-  gameMin=(gameMin+dt*(1440/DAY_SECONDS))%1440;
   updateTOD();
   if(!convOpen){
     if(!act)newActivity();
@@ -343,7 +346,7 @@ async function ariaInitiate(){
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
       ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,
       recentTurns:S.transcript.slice(-14).map(m=>({role:m.role,content:m.content})),
-      initiate:true, activity: act?act.k:''});
+      initiate:true, activity: act?act.k:'', localTime: localContext()});
     hideTyping();
     if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();}
   }catch(e){hideTyping();}
@@ -362,7 +365,7 @@ async function sendMsg(text){
   try{
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
       ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,
-      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text});
+      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text, localTime: localContext()});
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
