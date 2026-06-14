@@ -12,7 +12,11 @@
   html,body{height:100%;overflow:hidden;background:#0c0a0d;color:#f4ece1;font-family:'Inter',system-ui,sans-serif;touch-action:none;overscroll-behavior:none;}
   body{position:fixed;inset:0;}
 
-  .bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity 1s ease;}
+  .bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity 1s ease, filter 5s ease;}
+  #tod{position:absolute;inset:0;pointer-events:none;mix-blend-mode:soft-light;z-index:1;transition:background 6s ease;}
+  #walkLayer{position:fixed;inset:0;z-index:3;display:none;align-items:flex-end;justify-content:center;pointer-events:none;}
+  #walkLayer .walker img{display:block;height:76vh;filter:drop-shadow(0 8px 18px rgba(0,0,0,.5));animation:bobwalk .5s ease-in-out infinite;}
+  @keyframes bobwalk{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.4%)}}
   #bgB{opacity:0;}
   #bgVid{opacity:0;}
   #vig{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 200px 50px rgba(8,6,7,.65);
@@ -75,7 +79,9 @@
 <img id="bgA" class="bg" src="assets/room_living.jpeg" alt="">
 <img id="bgB" class="bg" alt="">
 <video id="bgVid" class="bg" muted loop playsinline preload="auto"></video>
+<div id="tod"></div>
 <div id="vig"></div>
+<div id="walkLayer"></div>
 
 <div id="hud"><div id="room">Living room</div></div>
 <div id="clock">—</div>
@@ -215,7 +221,7 @@ function currentBackdrop(){return ariaHere()?act.scene:ROOMS[roomIdx].empty;}
 
 const roomEl=document.getElementById('room'),capEl=document.getElementById('caption'),talkEl=document.getElementById('talk');
 function refresh(){
-  setBackdrop(currentBackdrop());
+  if(!walking) setBackdrop(currentBackdrop());   // during a walk-in, walkIn() controls the backdrop
   if(actx) setEnv(ROOMS[roomIdx].key);   // environmental sound follows the room you're in
   roomEl.textContent=ROOMS[roomIdx].name;
   document.getElementById('clock').textContent=fmtClock();
@@ -243,6 +249,7 @@ document.getElementById('navR').onclick=()=>go(1);
 
 /* Aria life loop */
 function newActivity(){
+  const prev=act?act.room:null;
   const c=S.closeness, h=hour();
   let a=pickActivity(h,c,S.mood);
   // she gravitates toward wherever you are, more so as you grow closer
@@ -253,9 +260,44 @@ function newActivity(){
     if(moodOnes.length) withYou=moodOnes;
     if(withYou.length) a=withYou[Math.floor(Math.random()*withYou.length)];
   }
-  act=a;actTimer=rand(a.dur[0],a.dur[1]);refresh();
+  act=a;actTimer=rand(a.dur[0],a.dur[1]);
+  // if SHE moves into the room you're standing in, show her walk in
+  const entering = booted && !convOpen && a.room===ROOMS[roomIdx].key && prev!==a.room;
+  booted=true;
+  if(entering){ walking=true; walkIn(()=>{walking=false;refresh();}); }
+  else refresh();
 }
 function rand(a,b){return a+Math.random()*(b-a);}
+
+/* ── she walks in when she joins you ── */
+let walking=false, booted=false;
+function footsteps(){ if(!actx)return; for(let i=0;i<6;i++) setTimeout(()=>{try{amBlip(rand(70,95),0.09,'sine',0.05)}catch(e){}}, i*270); }
+function walkIn(done){
+  setBackdrop(ROOMS[roomIdx].empty);
+  const layer=document.getElementById('walkLayer');
+  layer.style.display='flex';
+  layer.innerHTML='<div class="walker"><img src="assets/aria_walk.png" alt=""></div>';
+  const wk=layer.firstChild;
+  wk.style.transition='none'; wk.style.transform='translateX(-72vw)';
+  void wk.offsetWidth;
+  wk.style.transition='transform 1.7s cubic-bezier(.45,0,.55,1)';
+  wk.style.transform='translateX(0)';
+  footsteps();
+  setTimeout(()=>{ layer.style.display='none'; layer.innerHTML=''; done&&done(); }, 1750);
+}
+
+/* ── time-of-day grade (lighting shifts with the clock) ── */
+let curPhase=null;
+function phaseFor(h){ if(h<5)return'night'; if(h<8)return'dawn'; if(h<11)return'morning'; if(h<16)return'midday'; if(h<19)return'golden'; if(h<21)return'dusk'; return'night'; }
+const TOD={
+  dawn:{o:'rgba(255,180,120,.22)',f:'brightness(.95) saturate(1.05)'},
+  morning:{o:'rgba(255,226,170,.16)',f:'brightness(1.06) saturate(1.05)'},
+  midday:{o:'rgba(255,255,255,.05)',f:'brightness(1.08)'},
+  golden:{o:'rgba(255,150,70,.26)',f:'brightness(1.0) saturate(1.12)'},
+  dusk:{o:'rgba(110,80,160,.30)',f:'brightness(.86)'},
+  night:{o:'rgba(28,42,108,.42)',f:'brightness(.68) saturate(.9)'},
+};
+function updateTOD(){ const p=phaseFor(hour()); if(p===curPhase)return; curPhase=p; const t=TOD[p]; document.getElementById('tod').style.background=t.o; [bgA,bgB,bgVid].forEach(el=>{el.style.filter=t.f;}); }
 /* warm greeting when you two end up in the same room */
 let lastPresent=false, greetUntil=0, greetText=null;
 function greetFor(c){
@@ -269,6 +311,7 @@ let last=performance.now();
 function loop(now){
   let dt=(now-last)/1000;last=now;dt=Math.min(dt,0.1);
   gameMin=(gameMin+dt*(1440/DAY_SECONDS))%1440;
+  updateTOD();
   if(!convOpen){
     if(!act)newActivity();
     else{actTimer-=dt;if(actTimer<=0)newActivity();}
