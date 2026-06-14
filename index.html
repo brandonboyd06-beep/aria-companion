@@ -111,6 +111,10 @@
     <div style="font-family:'Newsreader',serif;letter-spacing:.3em;text-indent:.3em;font-size:20px;color:#f4ece1;margin-bottom:16px">SETTINGS</div>
     <label style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;color:#e7dccb;font-size:15px;border-bottom:1px solid rgba(255,255,255,.07)"><span>🗣️&nbsp; Aria's voice</span><input type="checkbox" id="setVoice" style="width:20px;height:20px"></label>
     <label style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;color:#e7dccb;font-size:15px;border-bottom:1px solid rgba(255,255,255,.07)"><span>🔊&nbsp; Ambient sound</span><input type="checkbox" id="setSound" style="width:20px;height:20px"></label>
+    <div style="margin-top:16px;text-align:left">
+      <div style="font-size:11px;letter-spacing:.18em;color:#9a8e7e;text-transform:uppercase;margin-bottom:6px;text-align:center">Her voice · tap to hear</div>
+      <div id="voicePicker"></div>
+    </div>
     <button id="openJournal" style="margin-top:16px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">📔 Her journal</button>
     <button id="setReset" style="margin-top:10px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(220,120,120,.4);background:transparent;color:#e69b9b;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">Reset relationship</button>
     <div id="setClose" style="margin-top:14px;font-size:12px;letter-spacing:.2em;color:#8a7f73;text-transform:uppercase;cursor:pointer">Close</div>
@@ -414,7 +418,7 @@ convInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.prev
 
 /* ───────── settings, ambient sound, voice ───────── */
 const SKEY="aria.settings.v1";
-let settings={voice:true,sound:true};
+let settings={voice:true,sound:true,voiceId:'English_Soft-spokenGirl',voiceSpeed:0.92};
 try{const j=JSON.parse(localStorage.getItem(SKEY));if(j)settings=Object.assign(settings,j);}catch(e){}
 function saveSettings(){try{localStorage.setItem(SKEY,JSON.stringify(settings));}catch(e){}}
 
@@ -469,24 +473,24 @@ function pickVoice(){const en=voices.filter(v=>/^en/i.test(v.lang));const pref=[
 function browserSpeak(clean){if(!('speechSynthesis'in window))return;try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(clean);const v=pickVoice();if(v)u.voice=v;u.rate=0.97;u.pitch=1.06;speechSynthesis.speak(u);}catch(e){}}
 function cleanForVoice(t){return String(t).replace(/\*[^*]*\*/g,' ').replace(/[_*#>`~]/g,'').replace(/\s+/g,' ').trim();}
 function stopVoice(){try{if(voiceSrc){voiceSrc.stop();voiceSrc=null;}}catch(e){}try{if('speechSynthesis'in window)speechSynthesis.cancel();}catch(e){}}
+async function synthAndPlay(text){
+  const r=await fetch(VOICE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({text, rpVoice:settings.voiceId, speed:settings.voiceSpeed})});
+  const d=await r.json();
+  if(d&&d.audio){
+    ensureCtx();
+    const ab=await (await fetch(d.audio)).arrayBuffer();
+    const buf=await actx.decodeAudioData(ab);
+    stopVoice();
+    voiceSrc=actx.createBufferSource();voiceSrc.buffer=buf;voiceSrc.connect(voiceGain||actx.destination);voiceSrc.start();
+    return true;
+  }
+  return false;
+}
 async function speak(text){
   if(!settings.voice)return;
   const clean=cleanForVoice(text); if(!clean)return;
   stopVoice();
-  try{
-    const r=await fetch(VOICE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({text:clean})});
-    const d=await r.json();
-    if(d&&d.audio){
-      ensureCtx();
-      const ab=await (await fetch(d.audio)).arrayBuffer();
-      const buf=await actx.decodeAudioData(ab);
-      if(!settings.voice)return;
-      stopVoice();
-      voiceSrc=actx.createBufferSource();voiceSrc.buffer=buf;voiceSrc.connect(voiceGain||actx.destination);voiceSrc.start();
-      return;
-    }
-    browserSpeak(clean);
-  }catch(e){ browserSpeak(clean); }
+  try{ if(!await synthAndPlay(clean)) browserSpeak(clean); }catch(e){ browserSpeak(clean); }
 }
 
 const setPanel=document.getElementById('setPanel'),setVoice=document.getElementById('setVoice'),setSound=document.getElementById('setSound');
@@ -496,6 +500,33 @@ document.getElementById('setClose').onclick=()=>{setPanel.style.display='none';}
 setVoice.onchange=()=>{settings.voice=setVoice.checked;saveSettings();if(!settings.voice)stopVoice();};
 setSound.onchange=()=>{settings.sound=setSound.checked;saveSettings();applySound();};
 document.getElementById('setReset').onclick=()=>{ if(confirm('This erases everything Aria knows about you and starts over. Sure?')){localStorage.removeItem(KEY);location.reload();} };
+
+/* ── voice picker: audition & choose how she sounds ── */
+const VOICES=[
+  {id:'English_Soft-spokenGirl', sp:0.92, label:'Soft &amp; close'},
+  {id:'English_Whispering_girl', sp:0.92, label:'Breathy whisper'},
+  {id:'English_SereneWoman',     sp:0.94, label:'Smooth &amp; serene'},
+  {id:'English_ConfidentWoman',  sp:0.95, label:'Low &amp; confident'},
+  {id:'English_Graceful_Lady',   sp:0.95, label:'Graceful'},
+  {id:'English_LovelyGirl',      sp:1.0,  label:'Warm &amp; sweet'},
+  {id:'Calm_Woman',              sp:1.0,  label:'Calm (original)'},
+];
+const VOICE_SAMPLES=["Mm… there you are. I was hoping you'd come find me.","Come here. I've missed the sound of your voice.","Stay a while. I like it when it's just us."];
+let sampleIdx=0;
+function renderVoices(){
+  const box=document.getElementById('voicePicker'); if(!box)return; box.innerHTML='';
+  for(const v of VOICES){
+    const sel=settings.voiceId===v.id;
+    const b=document.createElement('button');
+    b.style.cssText='display:block;width:100%;text-align:left;margin:4px 0;padding:9px 12px;border-radius:10px;border:1px solid '+(sel?'rgba(232,184,138,.6)':'rgba(255,255,255,.08)')+';background:'+(sel?'rgba(232,184,138,.12)':'transparent')+';color:#e7dccb;font-family:inherit;font-size:13px;cursor:pointer';
+    b.innerHTML='<span style="opacity:.55;margin-right:9px">▶</span>'+v.label+(sel?'<span style="float:right;color:#e8c6a3">✓</span>':'');
+    b.onclick=()=>{ settings.voiceId=v.id; settings.voiceSpeed=v.sp; saveSettings(); renderVoices();
+      const line=VOICE_SAMPLES[sampleIdx++ % VOICE_SAMPLES.length];
+      synthAndPlay(line).catch(()=>{}); };
+    box.appendChild(b);
+  }
+}
+renderVoices();
 
 /* ── her journal: read what she's been writing about herself & you ── */
 const jv=document.createElement('div');
