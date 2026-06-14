@@ -205,8 +205,12 @@ function refresh(){
   lastPresent=nowP;
   if(nowP){
     capEl.textContent=(performance.now()<greetUntil&&greetText)?greetText:act.here;
-    talkEl.style.display='';
-  } else {capEl.textContent=act?act.away:'';talkEl.style.display='none';}
+    talkEl.textContent='💬  Talk to Aria';
+  } else {
+    capEl.textContent=act?act.away:'';
+    talkEl.textContent='💬  Message Aria';
+  }
+  talkEl.style.display='inline-flex';   // explicit value (CSS default is none) — chat ALWAYS reachable
 }
 
 /* navigation */
