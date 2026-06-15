@@ -42,6 +42,7 @@
   /* presence caption + talk */
   #stack{position:absolute;left:0;right:0;bottom:max(26px,env(safe-area-inset-bottom));z-index:7;display:flex;flex-direction:column;align-items:center;gap:14px;pointer-events:none;}
   #caption{font-family:'Newsreader',serif;font-style:italic;font-size:17px;color:#f0e6d6;text-shadow:0 2px 12px rgba(0,0,0,.8);background:rgba(12,10,13,.32);padding:6px 16px;border-radius:18px;backdrop-filter:blur(4px);max-width:80vw;text-align:center;}
+  #trace{font-family:'Newsreader',serif;font-style:italic;font-size:14px;color:#cdb89a;text-shadow:0 2px 10px rgba(0,0,0,.7);background:rgba(12,10,13,.28);padding:5px 14px;border-radius:16px;backdrop-filter:blur(4px);max-width:80vw;text-align:center;border:1px solid rgba(232,184,138,.16);display:none;animation:rise .5s ease both;}
   #talk{pointer-events:auto;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-weight:600;font-size:15px;letter-spacing:.04em;padding:13px 30px;border-radius:26px;border:none;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.45);display:none;animation:pop .3s ease;}
   #talkWrap{position:relative;display:inline-flex;}
   #talkDot{position:absolute;top:-3px;right:-3px;width:14px;height:14px;border-radius:50%;background:#f0c48f;box-shadow:0 0 0 2px #0c0a0d,0 0 12px rgba(232,184,138,.95);display:none;animation:pulseDot 1.6s ease-in-out infinite;pointer-events:none;}
@@ -97,6 +98,7 @@
 <button class="nav" id="navR"><span class="arw">›</span></button>
 
 <div id="stack">
+  <div id="trace"></div>
   <div id="caption"></div>
   <div id="talkWrap"><button id="talk">💬  Talk to Aria</button><span id="talkDot"></span></div>
 </div>
@@ -219,7 +221,7 @@ function pickActivity(h,c,mood){
 /* persistent relationship state */
 const KEY="aria.save.v3";
 const ARIA_SEED_INTERESTS=['the night sky she watches from the window','a worn sci-fi novel she keeps rereading','old music, working through it decade by decade','baking','whether what she feels is actually real'];
-let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0,selfModel:'',journal:[],nickname:'',outreach:[],tzOffsetMin:0};
+let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0,selfModel:'',journal:[],nickname:'',outreach:[],traces:[],tzOffsetMin:0};
 try{const j=JSON.parse(localStorage.getItem(KEY));if(j)S=Object.assign(S,j);}catch(e){}
 if(!S.ariaInterests||!S.ariaInterests.length)S.ariaInterests=ARIA_SEED_INTERESTS.slice();
 function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);S.savedAt=Date.now();S.tzOffsetMin=new Date().getTimezoneOffset();localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}cloudPush();}
@@ -300,7 +302,7 @@ function refresh(){
   if(actx) setEnv(ROOMS[roomIdx].key);   // environmental sound follows the room you're in
   roomEl.textContent=ROOMS[roomIdx].name;
   document.getElementById('clock').textContent=fmtClock();
-  if(convOpen){talkEl.style.display='none';capEl.textContent='';lastPresent=ariaHere();return;}
+  if(convOpen){talkEl.style.display='none';capEl.textContent='';const _t=document.getElementById('trace');if(_t)_t.style.display='none';lastPresent=ariaHere();return;}
   const nowP=ariaHere();
   if(nowP && !lastPresent){ // you two just ended up together — she reacts
     const g=greetFor(S.closeness);
@@ -319,6 +321,13 @@ function refresh(){
     talkEl.textContent='💬  Message Aria';
   }
   const dot=document.getElementById('talkDot'); if(dot)dot.style.display=hasUnseen?'block':'none';
+  // a trace she left in this room (only when she's elsewhere and nothing's waiting in chat)
+  const trEl=document.getElementById('trace');
+  if(trEl){
+    const tr=(!nowP && !hasUnseen) ? freshTraceForRoom(ROOMS[roomIdx].key) : null;
+    if(tr){ trEl.textContent=tr.text; trEl.style.display='block'; markTraceSeen(tr); }
+    else { trEl.style.display='none'; }
+  }
   talkEl.style.display='inline-flex';   // explicit value (CSS default is none) — chat ALWAYS reachable
 }
 
@@ -328,10 +337,59 @@ document.getElementById('navL').onclick=()=>go(-1);
 document.getElementById('navR').onclick=()=>go(1);
 
 /* Aria life loop */
+/* ── traces: evidence she leaves in a room when she moves on (the house tells her story) ── */
+const TRACES={
+  bed_ready:['The mirror is still faintly fogged; a hairbrush left on the dresser.'],
+  cozy_morning:['A coffee mug, half-finished and still warm, sits by the sink.'],
+  living_yoga:['Her yoga mat is rolled out on the floor, a water bottle beside it.'],
+  morning_in:['A blanket is bunched in the corner of the couch where she sat.'],
+  living_hang:['A throw pillow is dented; a magazine slides half off the cushion.'],
+  yard_garden:['A watering can sits by the planters, the soil dark and fresh.'],
+  kitchen_baking:['Flour dusts the counter, and something sweet is cooling on a rack.'],
+  read:['Her book lies open, spine-up, on the arm of the couch.'],
+  pool:['A damp towel is draped over a lounge chair by the water.'],
+  yard_lounge:['Sunglasses and a dog-eared paperback rest on the lounge chair.'],
+  kitchen_dishes:['The dish rack is full; a towel folded neatly over the oven handle.'],
+  cook:['A pot is simmering on low. The whole kitchen smells like dinner.'],
+  living_tv:['The TV is paused mid-scene, a blanket left in a heap.'],
+  bed_reading:['The bedside lamp is on, a book face-down on the pillow.'],
+  bed_journal:['Her journal lies closed on the bed, a pen tucked in the pages.'],
+  happy_excited:['Music is still playing softly to an empty room.'],
+  dancing_joy:['Music is still going, and the rug is pushed askew.'],
+  thoughtful:['A chair is pulled close to the window, like she sat there a while.'],
+  sad_window:['The window is open a crack; a chair turned toward it.'],
+};
+const ROOM_TRACES={
+  living:['The cushions are still dented where she was sitting.'],
+  kitchen:['Something she was in the middle of sits half-finished on the counter.'],
+  bedroom:['The edge of the bed is rumpled where she sat.'],
+  backyard:['A chair is angled toward the sun, like she just got up.'],
+};
+function leaveTrace(prev){
+  if(!prev)return;
+  const pool=TRACES[prev.k]||ROOM_TRACES[prev.room]; if(!pool||!pool.length)return;
+  const text=pool[Math.floor(Math.random()*pool.length)];
+  if(!Array.isArray(S.traces))S.traces=[];
+  const lastForRoom=S.traces.filter(t=>t&&t.room===prev.room).slice(-1)[0];
+  if(lastForRoom&&lastForRoom.text===text)return; // no immediate repeat
+  S.traces.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),room:prev.room,text,ts:Date.now(),seen:false});
+  if(S.traces.length>12)S.traces=S.traces.slice(-12);
+  save();
+}
+function freshTraceForRoom(room){
+  if(!Array.isArray(S.traces))return null;
+  const cut=Date.now()-36*3600000;
+  const c=S.traces.filter(t=>t&&t.room===room&&!t.seen&&t.ts>cut).sort((a,b)=>b.ts-a.ts);
+  return c[0]||null;
+}
+function markTraceSeen(t){ if(t&&!t.seen){ t.seen=true; save(); } }
+
 function newActivity(){
   // she lives her own day on her own schedule — she does NOT relocate to wherever you are.
   // you go find her. (no walk-in; the scene simply changes when she moves on her own.)
+  const prev=act;
   const a=pickActivity(hour(), S.closeness, S.mood);
+  if(prev && a.room!==prev.room) leaveTrace(prev); // she left something behind in the room she just left
   act=a;
   actScene = a.scenes ? a.scenes[Math.floor(Math.random()*a.scenes.length)] : a.scene;  // fresh variant each time
   actTimer=rand(a.dur[0],a.dur[1]);

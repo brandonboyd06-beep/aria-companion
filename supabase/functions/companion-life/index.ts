@@ -13,6 +13,18 @@ const MODEL = "grok-4.20-0309-non-reasoning";
 const MIN_AWAY = 3;
 const MIN_SINCE_OUTREACH = 6;
 
+// traces she leaves around the house while you're away (the house tells her story)
+const SERVER_TRACES = [
+  { room: "kitchen", text: "A coffee mug, half-finished and still warm, sits by the sink." },
+  { room: "kitchen", text: "Flour dusts the counter, and something sweet is cooling on a rack." },
+  { room: "living", text: "Her book lies open, spine-up, on the arm of the couch." },
+  { room: "living", text: "A blanket is bunched in the corner of the couch where she sat." },
+  { room: "living", text: "Music is still playing softly to an empty room." },
+  { room: "backyard", text: "A damp towel is draped over a lounge chair by the water." },
+  { room: "backyard", text: "A watering can sits by the planters, the soil dark and fresh." },
+  { room: "bedroom", text: "The bedside lamp is on, a book face-down on the pillow." },
+];
+
 function stageLine(c: number): string {
   if (c <= 15) return "You're a polite home-assistant android, barely warm, but something in you flickers that you can't name.";
   if (c <= 35) return "You've grown familiar and warm with him; friendly, not romantic, quietly wondering about the feelings starting in you.";
@@ -123,6 +135,11 @@ Deno.serve(async (req: Request) => {
 
     const entry = { id: (now.toString(36) + Math.random().toString(36).slice(2, 6)), ts: now, text, mood: s.mood || null, seen: false };
     s.outreach = outreach.concat([entry]).slice(-10);
+    // leave a fresh trace in the house too, so coming back is a discovery even before opening chat
+    const tr = SERVER_TRACES[Math.floor(Math.random() * SERVER_TRACES.length)];
+    const traces: any[] = Array.isArray(s.traces) ? s.traces : [];
+    traces.push({ id: (now.toString(36) + Math.random().toString(36).slice(2, 5)), room: tr.room, text: tr.text, ts: now, seen: false });
+    s.traces = traces.slice(-12);
     s.savedAt = now;
 
     const { error: upErr } = await sb.from("aria_saves").upsert({ client_id: row.client_id, save: s, updated_at: new Date().toISOString() }, { onConflict: "client_id" });
