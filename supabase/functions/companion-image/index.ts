@@ -33,7 +33,22 @@ Deno.serve(async (req: Request) => {
     let data: any; try { data = JSON.parse(txt); } catch { data = null; }
     if (!r.ok || !data) return out({ error: "upstream", status: r.status, detail: txt.slice(0, 400) }, 502);
     const item = data?.data?.[0] || {};
-    const image = item.url ? item.url : (item.b64_json ? ("data:image/jpeg;base64," + item.b64_json) : null);
+    let image: string | null = null;
+    if (item.b64_json) {
+      image = "data:image/jpeg;base64," + item.b64_json;
+    } else if (item.url) {
+      // inline the bytes as a data URL so the browser never has to hotlink xAI's image host
+      try {
+        const ir = await fetch(item.url);
+        if (ir.ok) {
+          const buf = new Uint8Array(await ir.arrayBuffer());
+          let bin = ""; const chunk = 0x8000;
+          for (let i = 0; i < buf.length; i += chunk) bin += String.fromCharCode(...buf.subarray(i, i + chunk));
+          const ct = ir.headers.get("content-type") || "image/jpeg";
+          image = `data:${ct};base64,${btoa(bin)}`;
+        } else { image = item.url; }
+      } catch { image = item.url; }
+    }
     if (!image) return out({ error: "no_image", detail: JSON.stringify(data).slice(0, 300) }, 502);
     return out({ image, revised_prompt: item.revised_prompt || null });
   } catch (e) {
