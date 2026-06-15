@@ -168,7 +168,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-06-15.11"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-06-15.12"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -471,6 +471,14 @@ function fmt(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\*(
 function addMsg(role,text,anim=true){const d=document.createElement('div');d.className='msg '+(role==='assistant'?'aria':'you');d.innerHTML=role==='assistant'?fmt(text):text.replace(/&/g,'&amp;').replace(/</g,'&lt;');if(!anim)d.style.animation='none';convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;return d;}
 function showTyping(){hideTyping();typingEl=document.createElement('div');typingEl.className='typing';typingEl.innerHTML='<span></span><span></span><span></span>';convChat.appendChild(typingEl);convChat.scrollTop=convChat.scrollHeight;}
 function hideTyping(){if(typingEl){typingEl.remove();typingEl=null;}}
+// tap-to-expand lightbox for her photos
+const _lb=document.createElement('div');
+_lb.id='lightbox';
+_lb.style.cssText='position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:rgba(8,6,7,.93);backdrop-filter:blur(6px);padding:12px;cursor:zoom-out';
+_lb.innerHTML='<img id="lightboxImg" style="max-width:96vw;max-height:92vh;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.6)">';
+document.body.appendChild(_lb);
+_lb.onclick=()=>{ _lb.style.display='none'; document.getElementById('lightboxImg').src=''; };
+function openLightbox(src){ document.getElementById('lightboxImg').src=src; _lb.style.display='flex'; }
 // she sends a picture: render a developing placeholder, generate, then reveal it
 async function sendPhoto(prompt,alt){
   if(!prompt)return;
@@ -488,7 +496,8 @@ async function sendPhoto(prompt,alt){
       info+=' / img '+(/^https?:/.test(j.image)?'url':'data')+' len'+String(j.image).length;
       d.className='msg';d.style.cssText='align-self:flex-start;max-width:82%';d.innerHTML='';
       const im=document.createElement('img');im.alt=alt||'';
-      im.style.cssText='display:block;width:240px;max-width:78vw;height:auto;border-radius:14px;border:1px solid rgba(232,184,138,.35)';
+      im.style.cssText='display:block;width:240px;max-width:78vw;height:auto;border-radius:14px;border:1px solid rgba(232,184,138,.35);cursor:zoom-in';
+      im.onclick=()=>openLightbox(j.image);
       im.onload=()=>{console.log('[aria photo] loaded',im.naturalWidth+'x'+im.naturalHeight);convChat.scrollTop=convChat.scrollHeight;};
       im.onerror=()=>{ dbg('img tag failed to load. '+info+' src='+String(j.image).slice(0,80)); console.log('[aria photo] IMG ERROR',j.image); };
       im.src=j.image;
