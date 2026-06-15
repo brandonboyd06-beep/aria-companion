@@ -165,7 +165,7 @@ const ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI
 const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/companion-reflect";
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
-const VERSION="2026-06-15.8"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-06-15.9-diag"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -473,19 +473,25 @@ async function sendPhoto(prompt,alt){
   if(!prompt)return;
   const d=document.createElement('div');d.className='msg photo loading';d.innerHTML='<div class="ph">developing…</div>';
   convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;
+  const dbg=(t)=>{ d.className='msg aria'; d.style.fontSize='12px'; d.textContent='🛠 '+t; convChat.scrollTop=convChat.scrollHeight; };
+  let info='';
   try{
+    console.log('[aria photo] requesting',prompt.slice(0,40));
     const r=await fetch(IMG_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({prompt})});
-    const j=await r.json();
+    info='http '+r.status;
+    let j=null; try{ j=await r.json(); }catch(pe){ info+=' / json-parse-fail'; }
+    console.log('[aria photo] response',info,j);
     if(j&&j.image){
-      d.classList.remove('loading');d.innerHTML='';
+      info+=' / img '+(/^https?:/.test(j.image)?'url':'data')+' len'+String(j.image).length;
+      d.classList.remove('loading');d.innerHTML='';d.style.fontSize='';
       const im=document.createElement('img');im.alt=alt||'';
-      im.onload=()=>{convChat.scrollTop=convChat.scrollHeight;};
-      im.onerror=()=>{ d.className='msg aria'; d.textContent='*the photo wouldn’t load*'; };
+      im.onload=()=>{console.log('[aria photo] loaded',im.naturalWidth+'x'+im.naturalHeight);convChat.scrollTop=convChat.scrollHeight;};
+      im.onerror=()=>{ dbg('img tag failed to load. '+info+' src='+String(j.image).slice(0,80)); console.log('[aria photo] IMG ERROR',j.image); };
       im.src=j.image;
       d.appendChild(im);
       if(alt){const c=document.createElement('div');c.className='cap';c.textContent=alt;d.appendChild(c);}
-    } else { d.className='msg aria'; d.textContent='*she tried to send a photo, but it didn’t come through*'; }
-  }catch(e){ d.className='msg aria'; d.textContent='*the photo didn’t send*'; }
+    } else { dbg('no image in response. '+info+' body='+JSON.stringify(j).slice(0,120)); }
+  }catch(e){ dbg('request threw: '+String(e)+' ('+info+')'); console.log('[aria photo] THREW',e); }
 }
 function extractName(s){let t=s.trim().replace(/^(hi|hey|hello|yo)[,!. ]+/i,'').replace(/^(i['’]?m|i am|my name is|name['’]?s|it['’]?s|call me|this is)\s+/i,'').trim();let f=((t.split(/\s+/)[0]||t).replace(/[^A-Za-z'’-]+$/,'')).slice(0,20);return f?f.charAt(0).toUpperCase()+f.slice(1):'you';}
 async function callFn(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});return r.json();}
