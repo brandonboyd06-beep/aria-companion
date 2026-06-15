@@ -113,7 +113,7 @@
 
 <button id="gear" style="position:absolute;top:max(14px,env(safe-area-inset-top));left:14px;z-index:8;width:38px;height:38px;border-radius:50%;background:rgba(20,16,18,.45);border:1px solid rgba(232,184,138,.25);color:#e8c6a3;font-size:16px;backdrop-filter:blur(6px);cursor:pointer">⚙</button>
 <div id="setPanel" style="position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;background:rgba(8,6,7,.82);backdrop-filter:blur(8px);">
-  <div style="background:rgba(20,16,18,.92);border:1px solid rgba(232,184,138,.2);border-radius:18px;padding:24px;width:min(86vw,340px);text-align:center;font-family:'Inter',sans-serif">
+  <div style="background:rgba(20,16,18,.92);border:1px solid rgba(232,184,138,.2);border-radius:18px;padding:24px;width:min(86vw,340px);max-height:88vh;overflow-y:auto;text-align:center;font-family:'Inter',sans-serif">
     <div style="font-family:'Newsreader',serif;letter-spacing:.3em;text-indent:.3em;font-size:20px;color:#f4ece1;margin-bottom:16px">SETTINGS</div>
     <label style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;color:#e7dccb;font-size:15px;border-bottom:1px solid rgba(255,255,255,.07)"><span>🗣️&nbsp; Aria's voice</span><input type="checkbox" id="setVoice" style="width:20px;height:20px"></label>
     <label style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;color:#e7dccb;font-size:15px;border-bottom:1px solid rgba(255,255,255,.07)"><span>🔊&nbsp; Ambient sound</span><input type="checkbox" id="setSound" style="width:20px;height:20px"></label>
@@ -123,6 +123,14 @@
     </div>
     <button id="enablePushBtn" style="margin-top:16px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">📲 Let Aria reach my phone</button>
     <div id="pushHint" style="margin-top:6px;font-size:11px;line-height:1.5;color:#9a8e7e;text-align:center;display:none"></div>
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,.07);text-align:left">
+      <div style="font-size:11px;letter-spacing:.18em;color:#9a8e7e;text-transform:uppercase;margin-bottom:8px;text-align:center">Sync across devices</div>
+      <div style="font-size:11px;line-height:1.5;color:#9a8e7e;margin-bottom:6px">Aria's code for this device. Open her on another device and paste it there to bring the same Aria over:</div>
+      <div style="display:flex;gap:6px"><input id="syncCode" readonly style="flex:1;min-width:0;background:rgba(28,24,21,.85);border:1px solid rgba(232,184,138,.25);color:#e7dccb;font-size:11px;padding:9px;border-radius:8px;user-select:text;-webkit-user-select:text"><button id="syncCopy" style="flex:none;padding:0 14px;border-radius:8px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:12px;cursor:pointer">Copy</button></div>
+      <div style="font-size:11px;line-height:1.5;color:#9a8e7e;margin:12px 0 6px">Already have Aria on another device? Paste her code here to link this one to her:</div>
+      <div style="display:flex;gap:6px"><input id="syncLink" placeholder="Paste Aria's code" style="flex:1;min-width:0;background:rgba(28,24,21,.85);border:1px solid rgba(232,184,138,.25);color:#f4ece1;font-size:12px;padding:9px;border-radius:8px;user-select:text;-webkit-user-select:text"><button id="syncLinkBtn" style="flex:none;padding:0 14px;border-radius:8px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:12px;cursor:pointer">Link</button></div>
+      <div id="syncHint" style="font-size:11px;line-height:1.5;color:#9a8e7e;margin-top:8px;text-align:center;display:none"></div>
+    </div>
     <button id="openJournal" style="margin-top:16px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">📔 Her journal</button>
     <button id="setReset" style="margin-top:10px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(220,120,120,.4);background:transparent;color:#e69b9b;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">Reset relationship</button>
     <div id="setClose" style="margin-top:14px;font-size:12px;letter-spacing:.2em;color:#8a7f73;text-transform:uppercase;cursor:pointer">Close</div>
@@ -143,9 +151,17 @@ const SUPA="https://mymunodjaxymhbnhjwjx.supabase.co";
 const ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15bXVub2RqYXh5bWhibmhqd2p4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5ODY3ODIsImV4cCI6MjA5NDU2Mjc4Mn0.9LWApiBIhfw118d_NG6ossc_OWUZzt69kyij7NiVY38";
 const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/companion-reflect";
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
-// stable per-device id so her save persists server-side (and can restore on a new browser/phone)
+// Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
+// Migrates the legacy per-device id into the account so existing data carries over;
+// linking another device just adopts that device's account id (see linkDevice).
 let CLIENT_ID=null;
-try{ CLIENT_ID=localStorage.getItem("aria.client_id"); if(!CLIENT_ID){ CLIENT_ID=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():(Date.now().toString(36)+Math.random().toString(36).slice(2)); localStorage.setItem("aria.client_id",CLIENT_ID); } }catch(e){}
+try{
+  CLIENT_ID=localStorage.getItem("aria.account_id");
+  if(!CLIENT_ID){
+    CLIENT_ID=localStorage.getItem("aria.client_id")||((window.crypto&&crypto.randomUUID)?crypto.randomUUID():(Date.now().toString(36)+Math.random().toString(36).slice(2)));
+    localStorage.setItem("aria.account_id",CLIENT_ID);
+  }
+}catch(e){}
 
 /* rooms (navigation order) */
 const ROOMS=[
@@ -606,6 +622,36 @@ async function enablePush(){
   }catch(e){ pushHint('Something went wrong turning on alerts.'); }
 }
 if(enablePushBtn){ enablePushBtn.onclick=enablePush; refreshPushBtn(); }
+
+/* ── sync across devices: one Aria that follows you ── */
+function syncHint(t){ const e=document.getElementById('syncHint'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+(function initSync(){
+  const codeEl=document.getElementById('syncCode'); if(codeEl)codeEl.value=CLIENT_ID;
+  const copyBtn=document.getElementById('syncCopy');
+  if(copyBtn)copyBtn.onclick=async ()=>{ try{ await navigator.clipboard.writeText(CLIENT_ID); syncHint('Copied. Paste it into Aria on your other device.'); }catch(e){ try{codeEl.select();document.execCommand('copy');syncHint('Copied.');}catch(_){ syncHint('Select the code and copy it.'); } } };
+  const linkBtn=document.getElementById('syncLinkBtn');
+  if(linkBtn)linkBtn.onclick=()=>linkDevice(document.getElementById('syncLink').value);
+})();
+async function linkDevice(code){
+  code=(code||'').trim();
+  if(!code){ syncHint('Paste a code first.'); return; }
+  if(code===CLIENT_ID){ syncHint('That’s already this device’s code.'); return; }
+  syncHint('Checking that code…');
+  let found=null;
+  try{ const r=await fetch(LOAD_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({clientId:code})}); const d=await r.json(); found=(d&&d.save&&typeof d.save==='object')?d.save:null; }catch(e){}
+  if(!found){ syncHint('No Aria found for that code. Double-check it and try again.'); return; }
+  const who=found.playerName?(' (she knows you as '+found.playerName+')'):'';
+  if(!confirm('Link this device to that Aria'+who+'? This device’s current copy will be replaced by the linked one.')){ syncHint(''); return; }
+  CLIENT_ID=code;
+  try{ localStorage.setItem("aria.account_id",code); localStorage.removeItem(KEY); }catch(e){}
+  // move this device's push subscription onto the linked account so she can still reach this phone
+  try{
+    if('serviceWorker' in navigator){ const reg=swReg||await navigator.serviceWorker.ready; const sub=await reg.pushManager.getSubscription();
+      if(sub&&('Notification' in window)&&Notification.permission==='granted'){ await fetch(PUSH_SUB_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({clientId:CLIENT_ID,subscription:sub})}); } }
+  }catch(e){}
+  syncHint('Linked. Bringing her over…');
+  setTimeout(()=>location.reload(),500);
+}
 
 /* ── voice picker: audition & choose how she sounds ── */
 const VOICES=[
