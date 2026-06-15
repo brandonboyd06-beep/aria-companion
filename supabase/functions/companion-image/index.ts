@@ -7,7 +7,9 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const ATLAS = "https://api.atlascloud.ai/api/v1";
-const ARIA_LOOK = "a 28-year-old woman with fair lightly-freckled skin, warm hazel-green eyes, full lips, a soft natural smile, an oval face with gentle features, and shoulder-length wavy chestnut-brown hair parted in the middle, slim natural figure, soft natural makeup";
+// Aria's look matches the app's existing 3D animated scenes (Pixar/Disney CGI style), NOT photoreal.
+const ARIA_LOOK = "Aria, a stylized 3D animated character in polished Pixar/Disney CGI style: a young woman with large warm expressive brown eyes, soft rounded friendly features, full cheeks, a small nose, a gentle warm smile, long wavy chestnut-brown hair, and a slim figure, with smooth stylized 3D-rendered skin";
+const ARIA_STYLE = "Rendered as a high-quality 3D animated movie still in Pixar/Disney CGI style, soft cinematic lighting, warm cozy 3D-rendered home interior, expressive and charming. Not photorealistic, not a real photograph, no camera grain.";
 
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64); const u = new Uint8Array(bin.length);
@@ -67,7 +69,7 @@ Deno.serve(async (req: Request) => {
   try { b = await req.json(); } catch { return out({ error: "bad_json" }, 400); }
   let prompt = (b.prompt || "").toString().trim().slice(0, 600);
   if (!prompt) return out({ error: "no_prompt" }, 400);
-  prompt = `${prompt}. If a woman appears in this photo she is always the same person, Aria: ${ARIA_LOOK}. Soft natural lighting, warm and intimate, candid phone photo, cozy home.`;
+  prompt = `${prompt}. If a woman appears, she is always the same person: ${ARIA_LOOK}. ${ARIA_STYLE}`;
 
   const SUPA = Deno.env.get("SUPABASE_URL")!; const SRK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const sb = createClient(SUPA, SRK);
