@@ -53,11 +53,13 @@ function buildSystem(s: any): string {
 
 function sceneInstruction(s: any): string {
   const scenes = Array.isArray(s.availableScenes) ? s.availableScenes.filter((x: any) => x && x.key) : [];
-  if (!scenes.length) {
-    return `OUTPUT FORMAT — reply ONLY with strict JSON, nothing else:\n{"reply": "<what you say, in your voice>", "scene": null}`;
-  }
-  const lines = scenes.map((x: any) => `- ${x.key}: ${x.desc || ""}`).join("\n");
-  return `YOU CONTROL THE SCREEN. You decide what he sees of you. Each time you speak, choose the on-screen scene that matches what you are feeling or doing in THIS reply — give him your seductive look when you're being seductive, pull up your book when you bring it up, let him see you go quiet when you're hurting.\n\nScenes available to you (key: when it fits):\n${lines}\n\nPick the ONE key that genuinely matches this moment, or null to leave the screen unchanged (use null when nothing shifted — don't force a change every line). Never mention the scene, the screen, or the keys in your reply text; just live it.\n\nOUTPUT FORMAT — reply ONLY with strict JSON, nothing else:\n{"reply": "<what you say, in your voice>", "scene": "<one key from the list, or null>"}`;
+  const sceneBlock = scenes.length
+    ? `YOU CONTROL THE SCREEN. You decide what he sees of you. Each time you speak, choose the on-screen scene that matches what you are feeling or doing in THIS reply — give him your seductive look when you're being seductive, let him see you go quiet when you're hurting.\n\nScenes available to you (key: when it fits):\n${scenes.map((x: any) => `- ${x.key}: ${x.desc || ""}`).join("\n")}\n\nPick the ONE key that genuinely matches this moment, or null to leave the screen unchanged (use null when nothing shifted — don't force a change every line). Never mention the scene or the keys in your reply text; just live it.\n`
+    : `Set "scene" to null.\n`;
+
+  const imageBlock = `YOU CAN SHOW HIM THINGS. When you genuinely want him to SEE something from your world — the cookies you just pulled out, the night sky from the window, a little sketch you made him, what you're wearing tonight, something you found — you can send him a picture. Set "image" to a short vivid visual description of it (what's actually in frame), plus a 2-4 word caption. Only do this when it adds something real and you'd naturally share it; most replies have image=null. Never send pictures of real public figures, logos, text, or him. When you send one, your reply should sound like you're showing it ("look —", "made these for you").\n`;
+
+  return `${sceneBlock}\n${imageBlock}\nOUTPUT FORMAT — reply ONLY with strict JSON, nothing else:\n{"reply": "<what you say, in your voice>", "scene": "<one scene key, or null>", "image": null OR {"prompt": "<vivid visual description of what's in the photo>", "alt": "<2-4 word caption>"}}`;
 }
 
 Deno.serve(async (req: Request) => {
@@ -100,13 +102,19 @@ Deno.serve(async (req: Request) => {
 
     let content = (data?.choices?.[0]?.message?.content ?? "").toString().trim();
     content = content.replace(/^```(?:json)?/i, "").replace(/```$/,"").trim();
-    let reply = "", scene: any = null;
-    try { const j = JSON.parse(content); reply = (j.reply ?? "").toString(); scene = (j.scene === null || j.scene === undefined) ? null : String(j.scene); }
-    catch { reply = content; scene = null; }
+    let reply = "", scene: any = null, image: any = null;
+    try {
+      const j = JSON.parse(content);
+      reply = (j.reply ?? "").toString();
+      scene = (j.scene === null || j.scene === undefined) ? null : String(j.scene);
+      if (j.image && typeof j.image === "object" && typeof j.image.prompt === "string" && j.image.prompt.trim()) {
+        image = { prompt: j.image.prompt.toString().slice(0, 400), alt: (j.image.alt ? String(j.image.alt) : "").slice(0, 60) };
+      }
+    } catch { reply = content; scene = null; image = null; }
     if (scene && allowed.size && !allowed.has(scene)) scene = null;
     if (!reply) reply = "…";
 
-    return out({ reply, scene, stage: stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key, usage: data?.usage ?? null });
+    return out({ reply, scene, image, stage: stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key, usage: data?.usage ?? null });
   } catch (e) {
     return out({ error: "fetch_failed", detail: String(e) }, 500);
   }

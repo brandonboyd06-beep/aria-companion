@@ -65,6 +65,12 @@
   .aria{align-self:flex-start;font-family:'Newsreader',serif;font-size:20px;color:#f4ece1;padding-left:14px;border-left:2px solid rgba(232,184,138,.5);text-shadow:0 1px 8px rgba(0,0,0,.6)}
   .aria em{font-style:italic;color:#d9b896}
   .you{align-self:flex-end;text-align:right;font-size:15px;color:#c4cdd4;background:rgba(120,140,160,.12);border:1px solid rgba(150,170,190,.13);padding:8px 13px;border-radius:15px 15px 4px 15px;max-width:80%}
+  .photo{align-self:flex-start;max-width:74%;border-radius:16px 16px 16px 5px;overflow:hidden;border:1px solid rgba(232,184,138,.3);background:rgba(28,24,21,.6);animation:rise .45s ease both}
+  .photo img{display:block;width:100%;height:auto}
+  .photo.loading{width:190px;height:190px;display:flex;align-items:center;justify-content:center}
+  .photo .ph{font-family:'Inter';font-size:12px;letter-spacing:.04em;color:#cdb89a;opacity:.8;animation:phpulse 1.4s ease-in-out infinite}
+  @keyframes phpulse{0%,100%{opacity:.45}50%{opacity:.9}}
+  .photo .cap{padding:6px 10px 8px;font-family:'Newsreader',serif;font-style:italic;font-size:13px;color:#cdb89a}
   .typing{align-self:flex-start;padding-left:14px;display:flex;gap:5px}
   .typing span{width:6px;height:6px;border-radius:50%;background:#e8b88a;opacity:.5;animation:tp 1.2s infinite}
   .typing span:nth-child(2){animation-delay:.18s}.typing span:nth-child(3){animation-delay:.36s}
@@ -153,6 +159,7 @@ const SUPA="https://mymunodjaxymhbnhjwjx.supabase.co";
 const ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15bXVub2RqYXh5bWhibmhqd2p4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5ODY3ODIsImV4cCI6MjA5NDU2Mjc4Mn0.9LWApiBIhfw118d_NG6ossc_OWUZzt69kyij7NiVY38";
 const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/companion-reflect";
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
+const IMG_URL=SUPA+"/functions/v1/companion-image";
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -455,6 +462,22 @@ function fmt(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\*(
 function addMsg(role,text,anim=true){const d=document.createElement('div');d.className='msg '+(role==='assistant'?'aria':'you');d.innerHTML=role==='assistant'?fmt(text):text.replace(/&/g,'&amp;').replace(/</g,'&lt;');if(!anim)d.style.animation='none';convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;return d;}
 function showTyping(){hideTyping();typingEl=document.createElement('div');typingEl.className='typing';typingEl.innerHTML='<span></span><span></span><span></span>';convChat.appendChild(typingEl);convChat.scrollTop=convChat.scrollHeight;}
 function hideTyping(){if(typingEl){typingEl.remove();typingEl=null;}}
+// she sends a picture: render a developing placeholder, generate, then reveal it
+async function sendPhoto(prompt,alt){
+  if(!prompt)return;
+  const d=document.createElement('div');d.className='msg photo loading';d.innerHTML='<div class="ph">developing…</div>';
+  convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;
+  try{
+    const r=await fetch(IMG_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({prompt})});
+    const j=await r.json();
+    if(j&&j.image){
+      d.classList.remove('loading');d.innerHTML='';
+      const im=document.createElement('img');im.alt=alt||'';im.src=j.image;im.onload=()=>{convChat.scrollTop=convChat.scrollHeight;};
+      d.appendChild(im);
+      if(alt){const c=document.createElement('div');c.className='cap';c.textContent=alt;d.appendChild(c);}
+    } else { d.remove(); }
+  }catch(e){ d.remove(); }
+}
 function extractName(s){let t=s.trim().replace(/^(hi|hey|hello|yo)[,!. ]+/i,'').replace(/^(i['’]?m|i am|my name is|name['’]?s|it['’]?s|call me|this is)\s+/i,'').trim();let f=((t.split(/\s+/)[0]||t).replace(/[^A-Za-z'’-]+$/,'')).slice(0,20);return f?f.charAt(0).toUpperCase()+f.slice(1):'you';}
 async function callFn(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});return r.json();}
 
@@ -524,6 +547,7 @@ async function ariaInitiate(){
     hideTyping();
     if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();}
     if(res&&res.scene)applyChatScene(res.scene);
+    if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
     awayFor=null; markSeen();
   }catch(e){hideTyping();}
   finally{busy=false;convInput.focus();}
@@ -546,6 +570,7 @@ async function sendMsg(text){
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
     if(res&&res.scene)applyChatScene(res.scene);
+    if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
     awayFor=null; markSeen();
     if(S.sinceReflect>=4)doReflect();
   }catch(e){hideTyping();addMsg('assistant','*Something flickers.* Sorry — try again?');}
