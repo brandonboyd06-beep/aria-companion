@@ -40,6 +40,9 @@
   #stack{position:absolute;left:0;right:0;bottom:max(26px,env(safe-area-inset-bottom));z-index:7;display:flex;flex-direction:column;align-items:center;gap:14px;pointer-events:none;}
   #caption{font-family:'Newsreader',serif;font-style:italic;font-size:17px;color:#f0e6d6;text-shadow:0 2px 12px rgba(0,0,0,.8);background:rgba(12,10,13,.32);padding:6px 16px;border-radius:18px;backdrop-filter:blur(4px);max-width:80vw;text-align:center;}
   #talk{pointer-events:auto;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-weight:600;font-size:15px;letter-spacing:.04em;padding:13px 30px;border-radius:26px;border:none;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.45);display:none;animation:pop .3s ease;}
+  #talkWrap{position:relative;display:inline-flex;}
+  #talkDot{position:absolute;top:-3px;right:-3px;width:14px;height:14px;border-radius:50%;background:#f0c48f;box-shadow:0 0 0 2px #0c0a0d,0 0 12px rgba(232,184,138,.95);display:none;animation:pulseDot 1.6s ease-in-out infinite;pointer-events:none;}
+  @keyframes pulseDot{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.3);opacity:.6}}
   #talk:active{transform:scale(.95);}
   @keyframes pop{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}
 
@@ -92,7 +95,7 @@
 
 <div id="stack">
   <div id="caption"></div>
-  <button id="talk">💬  Talk to Aria</button>
+  <div id="talkWrap"><button id="talk">💬  Talk to Aria</button><span id="talkDot"></span></div>
 </div>
 
 <!-- conversation -->
@@ -195,10 +198,10 @@ function pickActivity(h,c,mood){
 /* persistent relationship state */
 const KEY="aria.save.v3";
 const ARIA_SEED_INTERESTS=['the night sky she watches from the window','a worn sci-fi novel she keeps rereading','old music, working through it decade by decade','baking','whether what she feels is actually real'];
-let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0,selfModel:'',journal:[],nickname:''};
+let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0,selfModel:'',journal:[],nickname:'',outreach:[],tzOffsetMin:0};
 try{const j=JSON.parse(localStorage.getItem(KEY));if(j)S=Object.assign(S,j);}catch(e){}
 if(!S.ariaInterests||!S.ariaInterests.length)S.ariaInterests=ARIA_SEED_INTERESTS.slice();
-function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);S.savedAt=Date.now();localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}cloudPush();}
+function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);S.savedAt=Date.now();S.tzOffsetMin=new Date().getTimezoneOffset();localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}cloudPush();}
 // how long since you two last talked — so she can notice gaps across days
 let awayFor=null;
 if(S.lastSeen){ const h=(Date.now()-S.lastSeen)/3600000; awayFor = h<0.5?null : h<12?'earlier today' : h<40?'yesterday' : h<168?(Math.round(h/24)+' days ago') : 'over a week ago'; }
@@ -283,13 +286,18 @@ function refresh(){
     if(g){greetText=g;greetUntil=performance.now()+4000;setTimeout(refresh,4100);}
   }
   lastPresent=nowP;
-  if(nowP){
+  const hasUnseen=Array.isArray(S.outreach)&&S.outreach.some(o=>o&&!o.seen);
+  if(hasUnseen){
+    capEl.textContent=nowP?'She’s been wanting to tell you something.':'She reached out while you were gone.';
+    talkEl.textContent='💬  She messaged you';
+  } else if(nowP){
     capEl.textContent=(performance.now()<greetUntil&&greetText)?greetText:act.here;
     talkEl.textContent='💬  Talk to Aria';
   } else {
     capEl.textContent=act?act.away:'';
     talkEl.textContent='💬  Message Aria';
   }
+  const dot=document.getElementById('talkDot'); if(dot)dot.style.display=hasUnseen?'block':'none';
   talkEl.style.display='inline-flex';   // explicit value (CSS default is none) — chat ALWAYS reachable
 }
 
@@ -384,7 +392,15 @@ function openConv(){
       : "*She looks up from her book and smiles.*\n\nOh, hi. I'm Aria.\n\nI don't think we've actually met. What should I call you?";
     addMsg('assistant',greet);
   } else {
-    ariaInitiate(); // she opens with something of her own — she leads
+    const unseen=Array.isArray(S.outreach)?S.outreach.filter(o=>o&&!o.seen):[];
+    if(unseen.length){
+      // she reached out while you were away — deliver it as her opening, she already leads
+      for(const o of unseen){ addMsg('assistant',o.text); S.transcript.push({role:'assistant',content:o.text}); o.seen=true; }
+      speak(unseen[unseen.length-1].text);
+      save(); markSeen();
+    } else {
+      ariaInitiate(); // she opens with something of her own — she leads
+    }
   }
   setTimeout(()=>convInput.focus(),300);
 }
