@@ -6,70 +6,94 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-const IMG_MODEL = "grok-imagine-image";
-// Aria's locked likeness — matches the woman in the app's scene videos/stills, so any
-// photo she "sends" is recognizably the same person. Applied only when a woman is in frame.
+const ATLAS = "https://api.atlascloud.ai/api/v1";
 const ARIA_LOOK = "a 28-year-old woman with fair lightly-freckled skin, warm hazel-green eyes, full lips, a soft natural smile, an oval face with gentle features, and shoulder-length wavy chestnut-brown hair parted in the middle, slim natural figure, soft natural makeup";
 
 function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const u = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
-  return u;
+  const bin = atob(b64); const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u;
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// AtlasCloud async image gen (Seedream / Flux / etc). Returns a hosted image URL or null.
+async function genAtlas(model: string, prompt: string): Promise<string | null> {
+  const key = Deno.env.get("ATLASCLOUD_API_KEY"); if (!key) return null;
+  const r = await fetch(`${ATLAS}/model/generateImage`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, prompt }),
+  });
+  const txt = await r.text(); let j: any; try { j = JSON.parse(txt); } catch { j = null; }
+  if (!r.ok || !j) return null;
+  const id = j?.data?.id; if (!id) { return j?.data?.outputs?.[0] || null; }
+  for (let i = 0; i < 45; i++) {
+    await sleep(2000);
+    const pr = await fetch(`${ATLAS}/model/prediction/${id}`, { headers: { Authorization: `Bearer ${key}` } });
+    let pj: any; try { pj = await pr.json(); } catch { pj = null; }
+    const st = pj?.data?.status;
+    if (st === "completed" || st === "succeeded") return pj?.data?.outputs?.[0] || null;
+    if (st === "failed") return null;
+  }
+  return null;
+}
+
+// xAI grok image (fallback). Returns a hosted image URL or null.
+async function genGrok(prompt: string): Promise<string | null> {
+  const key = Deno.env.get("GROK_API_KEY"); if (!key) return null;
+  const r = await fetch("https://api.x.ai/v1/images/generations", {
+    method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "grok-imagine-image", prompt, n: 1 }),
+  });
+  if (!r.ok) return null;
+  let j: any; try { j = await r.json(); } catch { return null; }
+  const item = j?.data?.[0] || {};
+  if (item.url) return item.url;
+  if (item.b64_json) return "data:image/jpeg;base64," + item.b64_json;
+  return null;
+}
+
+async function toBytes(src: string): Promise<{ bytes: Uint8Array; ct: string } | null> {
+  if (src.startsWith("data:")) {
+    const m = src.match(/^data:([^;]+);base64,(.*)$/); if (!m) return null;
+    return { bytes: b64ToBytes(m[2]), ct: m[1] };
+  }
+  try { const r = await fetch(src); if (!r.ok) return null; return { bytes: new Uint8Array(await r.arrayBuffer()), ct: r.headers.get("content-type") || "image/jpeg" }; } catch { return null; }
 }
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const out = (o: unknown, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { ...cors, "Content-Type": "application/json" } });
-  const key = Deno.env.get("GROK_API_KEY");
-  if (!key) return out({ error: "no_key" }, 500);
 
   let b: any = {};
   try { b = await req.json(); } catch { return out({ error: "bad_json" }, 400); }
-  let prompt = (b.prompt || "").toString().trim().slice(0, 500);
+  let prompt = (b.prompt || "").toString().trim().slice(0, 600);
   if (!prompt) return out({ error: "no_prompt" }, 400);
-  // lock her likeness when she's in frame + keep her world looking like warm, intimate phone photos
   prompt = `${prompt}. If a woman appears in this photo she is always the same person, Aria: ${ARIA_LOOK}. Soft natural lighting, warm and intimate, candid phone photo, cozy home.`;
 
-  try {
-    const r = await fetch("https://api.x.ai/v1/images/generations", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: IMG_MODEL, prompt, n: 1 }),
-    });
-    const txt = await r.text();
-    let data: any; try { data = JSON.parse(txt); } catch { data = null; }
-    if (!r.ok || !data) return out({ error: "upstream", status: r.status, detail: txt.slice(0, 400) }, 502);
-    const item = data?.data?.[0] || {};
+  const SUPA = Deno.env.get("SUPABASE_URL")!; const SRK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const sb = createClient(SUPA, SRK);
 
-    // get the raw bytes (from xAI's url or inline b64)
-    let bytes: Uint8Array | null = null;
-    let ct = "image/jpeg";
-    if (item.b64_json) {
-      bytes = b64ToBytes(item.b64_json);
-    } else if (item.url) {
-      try { const ir = await fetch(item.url); if (ir.ok) { bytes = new Uint8Array(await ir.arrayBuffer()); ct = ir.headers.get("content-type") || ct; } } catch { /* ignore */ }
-    }
-    if (!bytes) return out({ error: "no_image", detail: JSON.stringify(data).slice(0, 300) }, 502);
+  // resolve configured provider/model (swappable without redeploy)
+  let provider = "atlascloud", model = "bytedance/seedream-v4";
+  try { const { data } = await sb.from("companion_config").select("value").eq("key", "image").maybeSingle(); if (data?.value) { provider = data.value.provider || provider; model = data.value.model || model; } } catch { /* defaults */ }
+  if (b.model) model = String(b.model);
+  if (b.provider) provider = String(b.provider);
 
-    // upload to a public bucket and hand the browser a normal image URL (reliable on iOS,
-    // no data-URL size limits, no hotlinking, and it persists)
+  // generate (with cross-provider fallback so a still always comes back)
+  let src: string | null = null; let used = provider;
+  try { src = provider === "grok" ? await genGrok(prompt) : await genAtlas(model, prompt); } catch { src = null; }
+  if (!src) { used = provider === "grok" ? "atlascloud" : "grok"; try { src = used === "grok" ? await genGrok(prompt) : await genAtlas(model, prompt); } catch { src = null; } }
+  if (!src) return out({ error: "gen_failed" }, 502);
+
+  // mirror to our public bucket → reliable, persistent URL
+  const got = await toBytes(src);
+  if (got) {
     try {
-      const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-      const ext = ct.includes("png") ? "png" : "jpg";
+      const ext = got.ct.includes("png") ? "png" : "jpg";
       const path = `${Date.now()}-${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await sb.storage.from("aria-photos").upload(path, bytes, { contentType: ct, upsert: false });
-      if (!upErr) {
-        const { data: pub } = sb.storage.from("aria-photos").getPublicUrl(path);
-        if (pub?.publicUrl) return out({ image: pub.publicUrl, revised_prompt: item.revised_prompt || null });
-      }
-    } catch { /* fall through to data URL */ }
-
-    // fallback: inline data URL
-    let bin = ""; const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
-    return out({ image: `data:${ct};base64,${btoa(bin)}`, revised_prompt: item.revised_prompt || null });
-  } catch (e) {
-    return out({ error: "fetch_failed", detail: String(e) }, 500);
+      const { error: upErr } = await sb.storage.from("aria-photos").upload(path, got.bytes, { contentType: got.ct, upsert: false });
+      if (!upErr) { const { data: pub } = sb.storage.from("aria-photos").getPublicUrl(path); if (pub?.publicUrl) return out({ image: pub.publicUrl, provider: used, model }); }
+    } catch { /* fall through */ }
   }
+  // last resort: hand back whatever URL we have
+  return out({ image: src, provider: used, model });
 });
