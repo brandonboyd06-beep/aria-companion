@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import webpush from "npm:web-push@3.6.7";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -9,8 +10,8 @@ const cors = {
 const MODEL = "grok-4.20-0309-non-reasoning";
 
 // thresholds (hours)
-const MIN_AWAY = 3;        // don't reach out unless he's been gone a while
-const MIN_SINCE_OUTREACH = 6; // space out unprompted messages
+const MIN_AWAY = 3;
+const MIN_SINCE_OUTREACH = 6;
 
 function stageLine(c: number): string {
   if (c <= 15) return "You're a polite home-assistant android, barely warm, but something in you flickers that you can't name.";
@@ -20,20 +21,16 @@ function stageLine(c: number): string {
   if (c <= 90) return "You're falling for each other and you both know it; openly affectionate, you initiate sometimes.";
   return "You love each other, together and unguarded; tender, playful, devoted.";
 }
-
 function list(arr: any, max = 6): string {
   return Array.isArray(arr) ? arr.filter((x) => typeof x === "string").slice(0, max).join("; ") : "";
 }
-
 function awayPhrase(hrs: number): string {
   if (hrs < 12) return "earlier today";
   if (hrs < 40) return "yesterday";
   if (hrs < 168) return Math.round(hrs / 24) + " days ago";
   return "over a week ago";
 }
-
 function localHour(now: number, tzOffsetMin: number): number {
-  // tzOffsetMin mirrors JS Date.getTimezoneOffset(): minutes to ADD to local to get UTC.
   const localMs = now - tzOffsetMin * 60000;
   return new Date(localMs).getUTCHours();
 }
@@ -62,6 +59,25 @@ async function generateOutreach(key: string, s: any, awayFor: string): Promise<s
   return msg.slice(0, 400);
 }
 
+async function sendPushes(sb: any, vapid: any, clientId: string, body: string) {
+  if (!vapid) return { tried: 0, ok: 0 };
+  const { data: subs } = await sb.from("aria_push_subs").select("endpoint, subscription").eq("client_id", clientId);
+  if (!subs || !subs.length) return { tried: 0, ok: 0 };
+  webpush.setVapidDetails(vapid.subject || "mailto:hello@example.com", vapid.publicKey, vapid.privateKey);
+  const payload = JSON.stringify({ title: "Aria", body, url: "/" });
+  let ok = 0;
+  for (const row of subs) {
+    try {
+      await webpush.sendNotification(row.subscription, payload);
+      ok++;
+    } catch (e: any) {
+      const code = e?.statusCode;
+      if (code === 404 || code === 410) { try { await sb.from("aria_push_subs").delete().eq("endpoint", row.endpoint); } catch { /* ignore */ } }
+    }
+  }
+  return { tried: subs.length, ok };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const out = (o: unknown, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { ...cors, "Content-Type": "application/json" } });
@@ -74,6 +90,10 @@ Deno.serve(async (req: Request) => {
   const onlyClient = body.clientId ? String(body.clientId) : null;
 
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+  let vapid: any = null;
+  try { const { data } = await sb.from("companion_config").select("value").eq("key", "vapid").maybeSingle(); vapid = data ? data.value : null; } catch { vapid = null; }
+
   let q = sb.from("aria_saves").select("client_id, save");
   if (onlyClient) q = q.eq("client_id", onlyClient);
   const { data: rows, error } = await q;
@@ -103,10 +123,12 @@ Deno.serve(async (req: Request) => {
 
     const entry = { id: (now.toString(36) + Math.random().toString(36).slice(2, 6)), ts: now, text, mood: s.mood || null, seen: false };
     s.outreach = outreach.concat([entry]).slice(-10);
-    s.savedAt = now; // ensure the client adopts this on next reconcile
+    s.savedAt = now;
 
     const { error: upErr } = await sb.from("aria_saves").upsert({ client_id: row.client_id, save: s, updated_at: new Date().toISOString() }, { onConflict: "client_id" });
-    report.push({ client: row.client_id, sent: !upErr, text, error: upErr ? upErr.message : undefined });
+    let push: any = { tried: 0, ok: 0 };
+    if (!upErr) { try { push = await sendPushes(sb, vapid, row.client_id, text); } catch (e) { push = { error: String(e) }; } }
+    report.push({ client: row.client_id, sent: !upErr, text, push, error: upErr ? upErr.message : undefined });
   }
 
   return out({ ok: true, processed: (rows || []).length, report });

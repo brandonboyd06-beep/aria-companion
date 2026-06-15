@@ -1,0 +1,12 @@
+{
+  "name": "HOME — with Aria",
+  "short_name": "Aria",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0c0a0d",
+  "theme_color": "#0c0a0d",
+  "icons": [
+    { "src": "assets/aria.jpeg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any maskable" }
+  ]
+}

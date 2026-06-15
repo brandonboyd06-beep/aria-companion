@@ -4,7 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Aria">
 <meta name="theme-color" content="#0c0a0d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/aria.jpeg">
 <title>HOME — with Aria</title>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -118,6 +121,8 @@
       <div style="font-size:11px;letter-spacing:.18em;color:#9a8e7e;text-transform:uppercase;margin-bottom:6px;text-align:center">Her voice · tap to hear</div>
       <div id="voicePicker"></div>
     </div>
+    <button id="enablePushBtn" style="margin-top:16px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">📲 Let Aria reach my phone</button>
+    <div id="pushHint" style="margin-top:6px;font-size:11px;line-height:1.5;color:#9a8e7e;text-align:center;display:none"></div>
     <button id="openJournal" style="margin-top:16px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">📔 Her journal</button>
     <button id="setReset" style="margin-top:10px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(220,120,120,.4);background:transparent;color:#e69b9b;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">Reset relationship</button>
     <div id="setClose" style="margin-top:14px;font-size:12px;letter-spacing:.2em;color:#8a7f73;text-transform:uppercase;cursor:pointer">Close</div>
@@ -552,6 +557,55 @@ document.getElementById('setClose').onclick=()=>{setPanel.style.display='none';}
 setVoice.onchange=()=>{settings.voice=setVoice.checked;saveSettings();if(!settings.voice)stopVoice();};
 setSound.onchange=()=>{settings.sound=setSound.checked;saveSettings();applySound();};
 document.getElementById('setReset').onclick=()=>{ if(confirm('This erases everything Aria knows about you and starts over. Sure?')){localStorage.removeItem(KEY);location.reload();} };
+
+/* ── push notifications: let Aria reach your phone (web push) ── */
+const PUSH_PUBLIC="BG4lgmBJxfueRkilmP3E3FN7tUwn5sFyKDnRAswizn6JKqMakudDIquU7oiS1_WPSN1cu7leaxQKm5TvzmFU6QA";
+const PUSH_SUB_URL=SUPA+"/functions/v1/companion-push-subscribe";
+let swReg=null;
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').then(r=>{swReg=r;}).catch(()=>{}); }
+function b64ToU8(s){ const pad='='.repeat((4-s.length%4)%4); const b=(s+pad).replace(/-/g,'+').replace(/_/g,'/'); const raw=atob(b); const u=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++)u[i]=raw.charCodeAt(i); return u; }
+const enablePushBtn=document.getElementById('enablePushBtn');
+const pushHintEl=document.getElementById('pushHint');
+const isIOS=()=>/iphone|ipad|ipod/i.test(navigator.userAgent);
+const isStandalone=()=>window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+function pushHint(t){ if(pushHintEl){ pushHintEl.textContent=t||''; pushHintEl.style.display=t?'block':'none'; } }
+async function refreshPushBtn(){
+  if(!enablePushBtn)return;
+  try{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)){
+      enablePushBtn.textContent='📲 Phone alerts unavailable';
+      if(isIOS()&&!isStandalone()) pushHint('On iPhone: tap Share → Add to Home Screen, open Aria from there, then turn this on.');
+      return;
+    }
+    const reg=swReg||await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    if(sub&&('Notification' in window)&&Notification.permission==='granted'){ enablePushBtn.textContent='📲 Aria can reach your phone ✓'; pushHint('Tap again to turn off phone alerts.'); }
+    else { enablePushBtn.textContent='📲 Let Aria reach my phone'; pushHint(''); }
+  }catch(e){}
+}
+async function enablePush(){
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window)){
+    pushHint(isIOS()&&!isStandalone()?'On iPhone: Share → Add to Home Screen, open Aria from there, then enable.':'Notifications aren’t supported in this browser.'); return;
+  }
+  if(isIOS()&&!isStandalone()){ pushHint('Add Aria to your Home Screen first (Share → Add to Home Screen), open it from there, then enable.'); return; }
+  try{
+    const reg=swReg||await navigator.serviceWorker.ready;
+    const existing=await reg.pushManager.getSubscription();
+    if(existing&&Notification.permission==='granted'){ // toggle OFF
+      try{ await fetch(PUSH_SUB_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({clientId:CLIENT_ID,action:'unsubscribe',endpoint:existing.endpoint})}); }catch(e){}
+      try{ await existing.unsubscribe(); }catch(e){}
+      pushHint('Off. She won’t buzz your phone.'); refreshPushBtn(); return;
+    }
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){ pushHint('Notifications are blocked. Allow them for this app in your device settings.'); return; }
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64ToU8(PUSH_PUBLIC)});
+    const r=await fetch(PUSH_SUB_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({clientId:CLIENT_ID,subscription:sub})});
+    const d=await r.json().catch(()=>({}));
+    pushHint((d&&d.ok)?'Done. She can reach you now, even when the app is closed.':'Could not save that. Try again.');
+    refreshPushBtn();
+  }catch(e){ pushHint('Something went wrong turning on alerts.'); }
+}
+if(enablePushBtn){ enablePushBtn.onclick=enablePush; refreshPushBtn(); }
 
 /* ── voice picker: audition & choose how she sounds ── */
 const VOICES=[
