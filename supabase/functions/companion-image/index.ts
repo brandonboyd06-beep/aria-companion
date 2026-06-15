@@ -7,9 +7,9 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const ATLAS = "https://api.atlascloud.ai/api/v1";
-// Aria's look matches the app's existing 3D animated scenes (Pixar/Disney CGI style), NOT photoreal.
-const ARIA_LOOK = "Aria, a stylized 3D animated character in polished Pixar/Disney CGI style: a young woman with large warm expressive brown eyes, soft rounded friendly features, full cheeks, a small nose, a gentle warm smile, long wavy chestnut-brown hair, and a slim figure, with smooth stylized 3D-rendered skin";
-const ARIA_STYLE = "Rendered as a high-quality 3D animated movie still in Pixar/Disney CGI style, soft cinematic lighting, warm cozy 3D-rendered home interior, expressive and charming. Not photorealistic, not a real photograph, no camera grain.";
+// Aria's look: a consistent, photorealistic human (uncensored Flux). NOT cartoon/3D.
+const ARIA_LOOK = "Aria, the same beautiful photorealistic woman every time: mid-20s, warm sun-kissed tan skin, a fit and toned athletic figure, flawless smooth skin, a natural C-cup bust, long wavy chestnut-brown hair, warm brown eyes, full lips, and a radiant friendly smile";
+const ARIA_STYLE = "Photorealistic, captured like a real high-quality photograph, realistic skin texture and detail, natural soft lighting, lifelike and cinematic. Not a cartoon, not 3D animation, not an illustration.";
 
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64); const u = new Uint8Array(bin.length);

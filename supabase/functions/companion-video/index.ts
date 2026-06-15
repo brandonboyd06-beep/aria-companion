@@ -55,8 +55,8 @@ Deno.serve(async (req: Request) => {
 
   // ---- start a new job: ensure a first-frame still, then submit ----
   const baseMotion = (b.prompt || "a short, warm clip with gentle natural movement and a soft smile").toString().slice(0, 1400);
-  // keep the animated look consistent with the still / the app's 3D scenes
-  const motion = `${baseMotion}. Maintain the exact 3D animated Pixar/Disney CGI style of the source image; smooth stylized animation, not photorealistic.`;
+  // keep the video photorealistic and consistent with the source still
+  const motion = `${baseMotion}. Keep a photorealistic, lifelike look consistent with the source photo; natural realistic movement, not a cartoon or animation.`;
   let still = b.imageUrl ? String(b.imageUrl) : "";
   if (!still) {
     const sp = (b.stillPrompt || "a selfie of Aria smiling softly at the camera in her cozy home").toString().slice(0, 400);
