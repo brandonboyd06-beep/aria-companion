@@ -169,7 +169,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-06-15.14"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-06-15.15"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -626,12 +626,14 @@ _vp.innerHTML='<div style="background:rgba(20,16,18,.97);border:1px solid rgba(2
   +'<button id="vidPromptGo" style="padding:10px 18px;border-radius:12px;border:none;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-weight:600;font-family:inherit;font-size:14px;cursor:pointer">Send 🎬</button>'
   +'</div></div>';
 document.body.appendChild(_vp);
-let _vpSeed=null; // optional seed image (animate an existing photo)
+let _vpSeed=null;   // optional seed image (animate an existing photo)
+let _vpExtend=null; // optional source video (extend an existing clip)
 function closeVidPrompt(){ _vp.style.display='none'; }
-function openVidPrompt(seedUrl){ if(videoBusy)return; _vpSeed=seedUrl||null; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder=_vpSeed?'how should this photo move? e.g. turn around slowly':'describe the video… e.g. blow me a kiss from the kitchen'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
+function openVidPrompt(seedUrl){ if(videoBusy)return; _vpSeed=seedUrl||null; _vpExtend=null; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder=_vpSeed?'how should this photo move? e.g. turn around slowly':'describe the video… e.g. blow me a kiss from the kitchen'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
+function openExtendPrompt(videoUrl){ if(videoBusy)return; _vpExtend=videoUrl||null; _vpSeed=null; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder='what happens next? e.g. she turns and walks closer'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
 _vp.addEventListener('click',(e)=>{ if(e.target===_vp)closeVidPrompt(); });
 document.getElementById('vidPromptCancel').onclick=closeVidPrompt;
-document.getElementById('vidPromptGo').onclick=()=>{ const d=document.getElementById('vidPromptInput').value.trim(); const seed=_vpSeed; closeVidPrompt(); requestVideo(d, seed); };
+document.getElementById('vidPromptGo').onclick=()=>{ const d=document.getElementById('vidPromptInput').value.trim(); const seed=_vpSeed, ext=_vpExtend; closeVidPrompt(); if(ext)extendVideo(ext,d); else requestVideo(d, seed); };
 document.getElementById('vidPromptInput').addEventListener('keydown',(e)=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); document.getElementById('vidPromptGo').click(); } });
 
 async function requestVideo(desc, seedUrl){
@@ -662,24 +664,46 @@ async function requestVideo(desc, seedUrl){
     if(!start||!start.id){ d.textContent='*the video wouldn’t start*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
     // show the still as a preview while it renders
     if(start.still){ d.innerHTML=''; d.style.cssText='align-self:flex-start;max-width:82%;position:relative'; const pv=document.createElement('img'); pv.src=start.still; pv.style.cssText='display:block;width:240px;max-width:78vw;height:auto;border-radius:14px;filter:brightness(.6)'; d.appendChild(pv); const lb=document.createElement('div'); lb.textContent='🎬 filming…'; lb.style.cssText='position:absolute;bottom:8px;left:10px;color:#fff;font-family:Newsreader,serif;font-style:italic;font-size:13px;text-shadow:0 1px 6px #000'; d.appendChild(lb); }
-    // poll
-    let tries=0; const id=start.id;
-    const tick=async ()=>{
-      tries++;
-      let p=null; try{ p=await callFn(VID_URL,{action:'poll',id}); }catch(e){}
-      if(p&&p.status==='done'&&p.video){
-        d.innerHTML='';d.style.cssText='align-self:flex-start;max-width:82%';
-        const v=document.createElement('video'); v.src=p.video; v.controls=true; v.playsInline=true; v.setAttribute('playsinline',''); v.preload='metadata';
-        v.style.cssText='display:block;width:260px;max-width:80vw;height:auto;border-radius:14px;border:1px solid rgba(232,184,138,.35)';
-        d.appendChild(v); convChat.scrollTop=convChat.scrollHeight;
-        videoBusy=false; if(vbtn)vbtn.disabled=false; return;
-      }
-      if(p&&p.status==='failed'){ d.textContent='*the video didn’t come through*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
-      if(tries>45){ d.textContent='*the video is taking too long — try again later*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
-      setTimeout(tick,4000);
-    };
-    setTimeout(tick,4000);
+    pollVideoInto(d, start.id, vbtn);
   }catch(e){ d.textContent='*the video didn’t send*'; videoBusy=false; if(vbtn)vbtn.disabled=false; }
+}
+// render a finished clip + an Extend button into bubble d
+function renderVideoInto(d, videoUrl){
+  d.innerHTML='';d.style.cssText='align-self:flex-start;max-width:82%';
+  const v=document.createElement('video'); v.src=videoUrl; v.controls=true; v.playsInline=true; v.setAttribute('playsinline',''); v.preload='metadata';
+  v.style.cssText='display:block;width:260px;max-width:80vw;height:auto;border-radius:14px;border:1px solid rgba(232,184,138,.35)';
+  d.appendChild(v);
+  const ex=document.createElement('button'); ex.textContent='➕ Extend';
+  ex.style.cssText='display:block;margin-top:6px;padding:6px 12px;border-radius:10px;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.7);color:#e8c6a3;font-family:Inter;font-size:12px;cursor:pointer';
+  ex.onclick=()=>openExtendPrompt(videoUrl);
+  d.appendChild(ex);
+  convChat.scrollTop=convChat.scrollHeight;
+}
+function pollVideoInto(d, id, vbtn){
+  let tries=0;
+  const tick=async ()=>{
+    tries++;
+    let p=null; try{ p=await callFn(VID_URL,{action:'poll',id}); }catch(e){}
+    if(p&&p.status==='done'&&p.video){ renderVideoInto(d,p.video); videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
+    if(p&&p.status==='failed'){ d.textContent='*the video didn’t come through*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
+    if(tries>60){ d.textContent='*the video is taking too long — try again later*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
+    setTimeout(tick,4000);
+  };
+  setTimeout(tick,4000);
+}
+// extend an existing clip into a longer continuation
+async function extendVideo(videoUrl, desc){
+  if(videoBusy)return; videoBusy=true; const vbtn=document.getElementById('convVid'); if(vbtn)vbtn.disabled=true;
+  desc=(desc||'').toString().trim();
+  addMsg('user', desc?('➕ extend: '+desc):'➕ extend the clip');S.transcript.push({role:'user',content:'(asks to extend the video)'});save();
+  const d=document.createElement('div');d.className='msg';d.style.cssText='align-self:flex-start;max-width:82%;font-size:13px;color:#cdb89a;font-family:Newsreader,serif;font-style:italic';
+  d.textContent='➕ extending the clip… (this takes ~30–60s)';
+  convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;
+  try{
+    const start=await callFn(VID_URL,{action:'extend', video:videoUrl, prompt: desc||'continue the scene naturally, smooth seamless motion'});
+    if(!start||!start.id){ d.textContent='*couldn’t extend that clip*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
+    pollVideoInto(d, start.id, vbtn);
+  }catch(e){ d.textContent='*the extend didn’t send*'; videoBusy=false; if(vbtn)vbtn.disabled=false; }
 }
 document.getElementById('convVid').onclick=openVidPrompt;
 
