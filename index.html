@@ -484,20 +484,51 @@ function openConv(){
   setTimeout(()=>convInput.focus(),300);
 }
 // She starts the conversation herself, grounded in her interests / what she's doing / what lands with you
+/* ── she directs the screen: her brain picks the scene that matches her intent each turn ── */
+const CHAT_SCENES=[
+ {key:'flirty',     min:50, files:['assets/scene_flirty_dressed.mp4'], desc:'flirty, seductive, turning-heads energy'},
+ {key:'loving',     min:60, files:['assets/scene_loving_gaze.mp4'],    desc:'tender, adoring, looking at him like he is the best part of her day'},
+ {key:'close',      min:60, files:['assets/scene_together_couch.mp4'], desc:'wanting him close, patting the cushion beside her'},
+ {key:'dressed_up', min:45, files:['assets/scene_dressed_up.mp4'],     desc:'dressed up tonight, a little shy about it'},
+ {key:'vulnerable', min:50, files:['assets/scene_vulnerable_open.mp4'],desc:'vulnerable, open, about to tell him something real'},
+ {key:'playful',    min:25, files:['assets/scene_playful_tease.mp4'],  desc:'playful, teasing, mischievous'},
+ {key:'happy',      min:0,  files:['assets/scene_happy_excited.mp4'],  desc:'happy, excited, beaming'},
+ {key:'dancing',    min:30, files:['assets/scene_dancing_joy.mp4'],    desc:'giddy, dancing, full of joy'},
+ {key:'thoughtful', min:0,  files:['assets/scene_thoughtful.mp4'],     desc:'thoughtful, reflective, gazing out the window'},
+ {key:'sad',        min:0,  files:['assets/scene_sad_window.mp4'],     desc:'sad, quiet, melancholy'},
+ {key:'missing',    min:35, files:['assets/scene_missing_you.mp4'],    desc:'missing him, face lighting up that he is here'},
+ {key:'reading',    min:0,  files:['assets/scene_living_read.mp4'],    desc:'with a book, reading or talking about a book'},
+ {key:'cozy',       min:0,  files:['assets/scene_living_tv.mp4'],      desc:'cozy, relaxed, a blanket-and-quiet-evening feeling'},
+ {key:'morning',    min:0,  files:['assets/scene_cozy_morning.mp4'],   desc:'soft morning, coffee in hand'},
+ {key:'yoga',       min:0,  files:['assets/scene_living_yoga.mp4'],    desc:'calm, centered, grounded'},
+ {key:'baking',     min:0,  files:['assets/scene_kitchen_baking.mp4'], desc:'baking, flour on her cheek'},
+ {key:'pool',       min:0,  files:['assets/scene_backyard_pool.mp4'],  desc:'out by the pool, sun, playful'},
+];
+function scenesForCloseness(){ return CHAT_SCENES.filter(s=>(s.min||0)<=S.closeness).map(s=>({key:s.key,desc:s.desc})); }
+let chatSceneKey=null;
+function applyChatScene(key){
+  if(!key||key==='null')return;
+  const s=CHAT_SCENES.find(x=>x.key===key); if(!s)return;
+  if(key===chatSceneKey)return;            // already showing it
+  chatSceneKey=key;
+  setBackdrop(s.files[Math.floor(Math.random()*s.files.length)]);
+}
+
 async function ariaInitiate(){
   if(busy)return;busy=true;showTyping();
   try{
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
       ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
-      recentTurns:S.transcript.slice(-14).map(m=>({role:m.role,content:m.content})),
+      recentTurns:S.transcript.slice(-14).map(m=>({role:m.role,content:m.content})), availableScenes:scenesForCloseness(),
       initiate:true, activity: act?act.k:'', localTime: localContext(), awayFor, lastMood:S.mood});
     hideTyping();
     if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();}
+    if(res&&res.scene)applyChatScene(res.scene);
     awayFor=null; markSeen();
   }catch(e){hideTyping();}
   finally{busy=false;convInput.focus();}
 }
-function closeConv(){convOpen=false;conv.classList.remove('show');
+function closeConv(){convOpen=false;conv.classList.remove('show');chatSceneKey=null;
   document.getElementById('navL').style.display='';document.getElementById('navR').style.display='';
   act=null;refresh();}
 document.getElementById('convClose').onclick=closeConv;
@@ -510,10 +541,11 @@ async function sendMsg(text){
   try{
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
       ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
-      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text, localTime: localContext(), awayFor, lastMood:S.mood});
+      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})),userMessage:text, availableScenes:scenesForCloseness(), localTime: localContext(), awayFor, lastMood:S.mood});
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
+    if(res&&res.scene)applyChatScene(res.scene);
     awayFor=null; markSeen();
     if(S.sinceReflect>=4)doReflect();
   }catch(e){hideTyping();addMsg('assistant','*Something flickers.* Sorry — try again?');}
