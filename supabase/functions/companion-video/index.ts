@@ -67,17 +67,23 @@ Deno.serve(async (req: Request) => {
   }
   if (!still || !/^https?:/.test(still)) return out({ error: "no_first_frame", still: still.slice(0, 60) }, 502);
 
-  const payload = {
-    model: MODEL,
+  // resolve video model: body override > companion_config('video') > default Seedance
+  let model = MODEL;
+  try { const sb2 = createClient(SUPA, SRK); const { data } = await sb2.from("companion_config").select("value").eq("key", "video").maybeSingle(); if (data?.value?.model) model = String(data.value.model); } catch { /* default */ }
+  if (b.model) model = String(b.model);
+  const isWan = /wan/i.test(model);
+
+  const payload: any = {
+    model,
     image: still,
     prompt: motion,
-    duration: Math.max(4, Math.min(12, Number(b.duration) || 5)),
-    resolution: b.resolution === "480p" ? "480p" : "720p",
+    duration: Math.max(4, Math.min(15, Number(b.duration) || 5)),
+    resolution: b.resolution || "720p",
     generate_audio: b.audio !== false,
-    aspect_ratio: b.aspect || "9:16",
-    camera_fixed: false,
     seed: -1,
   };
+  if (isWan) { payload.shot_type = b.shot || "single"; }
+  else { payload.aspect_ratio = b.aspect || "9:16"; payload.camera_fixed = false; payload.duration = Math.min(12, payload.duration); }
   try {
     const r = await fetch(`${ATLAS}/model/generateVideo`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(payload) });
     const txt = await r.text();
