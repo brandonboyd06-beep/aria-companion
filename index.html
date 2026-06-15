@@ -80,8 +80,9 @@
   #convInput{flex:1;resize:none;background:rgba(28,24,21,.85);border:1px solid rgba(232,184,138,.25);color:#f4ece1;font-family:'Inter';font-size:16px;padding:12px 15px;border-radius:22px;max-height:110px;outline:none}
   #convSend{flex:none;width:46px;height:46px;border-radius:50%;border:none;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-size:20px;cursor:pointer}
   #convSend:active{transform:scale(.9)}
-  #convCam{flex:none;width:46px;height:46px;border-radius:50%;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.85);color:#e8c6a3;font-size:19px;cursor:pointer}
-  #convCam:active{transform:scale(.9)}
+  #convCam,#convVid{flex:none;width:46px;height:46px;border-radius:50%;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.85);color:#e8c6a3;font-size:19px;cursor:pointer}
+  #convCam:active,#convVid:active{transform:scale(.9)}
+  #convVid:disabled{opacity:.5}
 
   /* boot */
   #boot{position:fixed;inset:0;z-index:50;background:#0c0a0d;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;text-align:center;padding:10vw;transition:opacity 1.2s}
@@ -117,6 +118,7 @@
   <div id="convChat"></div>
   <div id="convBar"><form id="convForm">
     <button id="convCam" type="button" title="Ask Aria for a photo">📷</button>
+    <button id="convVid" type="button" title="Ask Aria for a video">🎬</button>
     <textarea id="convInput" rows="1" placeholder="Say something to her…"></textarea>
     <button id="convSend" type="submit">↑</button>
   </form></div>
@@ -165,7 +167,8 @@ const ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI
 const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/companion-reflect";
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
-const VERSION="2026-06-15.10"; try{console.log("Aria build",VERSION);}catch(e){}
+const VID_URL=SUPA+"/functions/v1/companion-video";
+const VERSION="2026-06-15.11"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -593,6 +596,54 @@ async function requestSelfie(){
   finally{busy=false;convInput.focus();}
 }
 document.getElementById('convCam').onclick=requestSelfie;
+
+// video button: ask Aria for a short video clip (still -> Seedance). Async: render placeholder, poll.
+let videoBusy=false;
+async function requestVideo(){
+  if(videoBusy)return; videoBusy=true;
+  const vbtn=document.getElementById('convVid'); if(vbtn)vbtn.disabled=true;
+  addMsg('user','🎬');S.transcript.push({role:'user',content:'(asks for a video of you)'});save();
+  // a short in-character line up front
+  let reply='give me a sec, baby…';
+  try{
+    const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
+      ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
+      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})), userMessage:'(make me a short video of you right now)', availableScenes:scenesForCloseness(), localTime: localContext(), awayFor, lastMood:S.mood});
+    if(res&&res.reply)reply=res.reply.trim();
+    if(res&&res.scene)applyChatScene(res.scene);
+  }catch(e){}
+  addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();markSeen();
+  // placeholder bubble
+  const d=document.createElement('div');d.className='msg';d.style.cssText='align-self:flex-start;max-width:82%;font-size:13px;color:#cdb89a;font-family:Newsreader,serif;font-style:italic';
+  d.textContent='🎬 filming a little something… (this takes ~30–60s)';
+  convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;
+  try{
+    const start=await callFn(VID_URL,{action:'start',
+      stillPrompt:'a warm, candid selfie-style photo of Aria in her cozy home right now',
+      prompt:'she looks into the camera, smiles, and gives a soft warm hello; gentle natural movement, relaxed and intimate'});
+    if(!start||!start.id){ d.textContent='*the video wouldn’t start*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
+    // show the still as a preview while it renders
+    if(start.still){ d.innerHTML=''; d.style.cssText='align-self:flex-start;max-width:82%;position:relative'; const pv=document.createElement('img'); pv.src=start.still; pv.style.cssText='display:block;width:240px;max-width:78vw;height:auto;border-radius:14px;filter:brightness(.6)'; d.appendChild(pv); const lb=document.createElement('div'); lb.textContent='🎬 filming…'; lb.style.cssText='position:absolute;bottom:8px;left:10px;color:#fff;font-family:Newsreader,serif;font-style:italic;font-size:13px;text-shadow:0 1px 6px #000'; d.appendChild(lb); }
+    // poll
+    let tries=0; const id=start.id;
+    const tick=async ()=>{
+      tries++;
+      let p=null; try{ p=await callFn(VID_URL,{action:'poll',id}); }catch(e){}
+      if(p&&p.status==='done'&&p.video){
+        d.innerHTML='';d.style.cssText='align-self:flex-start;max-width:82%';
+        const v=document.createElement('video'); v.src=p.video; v.controls=true; v.playsInline=true; v.setAttribute('playsinline',''); v.preload='metadata';
+        v.style.cssText='display:block;width:260px;max-width:80vw;height:auto;border-radius:14px;border:1px solid rgba(232,184,138,.35)';
+        d.appendChild(v); convChat.scrollTop=convChat.scrollHeight;
+        videoBusy=false; if(vbtn)vbtn.disabled=false; return;
+      }
+      if(p&&p.status==='failed'){ d.textContent='*the video didn’t come through*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
+      if(tries>45){ d.textContent='*the video is taking too long — try again later*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
+      setTimeout(tick,4000);
+    };
+    setTimeout(tick,4000);
+  }catch(e){ d.textContent='*the video didn’t send*'; videoBusy=false; if(vbtn)vbtn.disabled=false; }
+}
+document.getElementById('convVid').onclick=requestVideo;
 
 async function sendMsg(text){
   if(busy||!text.trim())return;busy=true;
