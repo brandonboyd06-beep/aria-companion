@@ -144,7 +144,9 @@
     </div>
     <button id="openJournal" style="margin-top:16px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">📔 Her journal</button>
     <button id="setReset" style="margin-top:10px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(220,120,120,.4);background:transparent;color:#e69b9b;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">Reset relationship</button>
-    <div id="setClose" style="margin-top:14px;font-size:12px;letter-spacing:.2em;color:#8a7f73;text-transform:uppercase;cursor:pointer">Close</div>
+    <button id="forceUpdate" style="margin-top:10px;width:100%;padding:9px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#9a8e7e;font-family:inherit;font-size:12px;letter-spacing:.1em;cursor:pointer">↻ Force update</button>
+    <div style="margin-top:10px;font-size:10px;letter-spacing:.16em;color:#6f665b;text-transform:uppercase">Build <span id="buildVer"></span></div>
+    <div id="setClose" style="margin-top:12px;font-size:12px;letter-spacing:.2em;color:#8a7f73;text-transform:uppercase;cursor:pointer">Close</div>
   </div>
 </div>
 
@@ -163,6 +165,7 @@ const ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI
 const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/companion-reflect";
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
+const VERSION="2026-06-15.8"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -714,6 +717,12 @@ document.getElementById('setClose').onclick=()=>{setPanel.style.display='none';}
 setVoice.onchange=()=>{settings.voice=setVoice.checked;saveSettings();if(!settings.voice)stopVoice();};
 setSound.onchange=()=>{settings.sound=setSound.checked;saveSettings();applySound();};
 document.getElementById('setReset').onclick=()=>{ if(confirm('This erases everything Aria knows about you and starts over. Sure?')){localStorage.removeItem(KEY);location.reload();} };
+(function(){ const bv=document.getElementById('buildVer'); if(bv)bv.textContent=VERSION; })();
+document.getElementById('forceUpdate').onclick=async ()=>{
+  try{ if('caches' in window){ const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); } }catch(e){}
+  try{ if('serviceWorker' in navigator){ const rs=await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r=>r.unregister())); } }catch(e){}
+  location.href = location.pathname + '?v=' + Date.now(); // new URL bypasses any cached page
+};
 
 /* ── push notifications: let Aria reach your phone (web push) ── */
 const PUSH_PUBLIC="BG4lgmBJxfueRkilmP3E3FN7tUwn5sFyKDnRAswizn6JKqMakudDIquU7oiS1_WPSN1cu7leaxQKm5TvzmFU6QA";
