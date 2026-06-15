@@ -6,6 +6,9 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const IMG_MODEL = "grok-imagine-image";
+// Aria's locked likeness — matches the woman in the app's scene videos/stills, so any
+// photo she "sends" is recognizably the same person. Applied only when a woman is in frame.
+const ARIA_LOOK = "a 28-year-old woman with fair lightly-freckled skin, warm hazel-green eyes, full lips, a soft natural smile, an oval face with gentle features, and shoulder-length wavy chestnut-brown hair parted in the middle, slim natural figure, soft natural makeup";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -17,8 +20,8 @@ Deno.serve(async (req: Request) => {
   try { b = await req.json(); } catch { return out({ error: "bad_json" }, 400); }
   let prompt = (b.prompt || "").toString().trim().slice(0, 500);
   if (!prompt) return out({ error: "no_prompt" }, 400);
-  // gentle cohesion: her world looks like warm, intimate phone photos
-  prompt = `${prompt}. Soft natural lighting, warm and intimate, photographic, cozy home.`;
+  // lock her likeness when she's in frame + keep her world looking like warm, intimate phone photos
+  prompt = `${prompt}. If a woman appears in this photo she is always the same person, Aria: ${ARIA_LOOK}. Soft natural lighting, warm and intimate, candid phone photo, cozy home.`;
 
   try {
     const r = await fetch("https://api.x.ai/v1/images/generations", {
