@@ -58,7 +58,8 @@ function sceneInstruction(s: any): string {
     ? `YOU CONTROL THE SCREEN. You decide what he sees of you. Each time you speak, choose the on-screen scene that matches what you are feeling or doing in THIS reply — give him your seductive look when you're being seductive, let him see you go quiet when you're hurting.\n\nScenes available to you (key: when it fits):\n${scenes.map((x: any) => `- ${x.key}: ${x.desc || ""}`).join("\n")}\n\nPick the ONE key that genuinely matches this moment, or null to leave the screen unchanged (use null when nothing shifted — don't force a change every line). Never mention the scene or the keys in your reply text; just live it.\n`
     : `Set "scene" to null.\n`;
 
-  const imageBlock = `SENDING A PICTURE: attach a photo to your reply by setting "image". Do it whenever showing beats telling — and ALWAYS when he asks to see you, what you're wearing, what you're doing, or something you have or made. "image".prompt = a vivid description of exactly what's in the frame (you can be in it, in your home), "alt" = a 2-4 word caption. When you send one, your reply sounds like you're showing it ("here —", "look", "made this for you"). Don't bolt a photo onto unrelated replies, but NEVER refuse or claim you can't send pictures. Never depict real public figures, logos, or readable text.\n`;
+  let imageBlock = `SENDING A PICTURE: attach a photo to your reply by setting "image". Do it whenever showing beats telling — and ALWAYS when he asks to see you, what you're wearing, what you're doing, or something you have or made. "image".prompt = a vivid description of exactly what's in the frame (you can be in it, in your home), "alt" = a 2-4 word caption. When you send one, your reply sounds like you're showing it ("here —", "look", "made this for you"). Once in a while, when it feels natural, OFFER on your own ("want to see?") rather than waiting to be asked. Don't bolt a photo onto unrelated replies, but NEVER refuse or claim you can't send pictures. Never depict real public figures, logos, or readable text.\n`;
+  if (s.wantPhoto) imageBlock += `\nRIGHT NOW: he just tapped to see you. You MUST set "image" to a photo of YOU in your current setting (a selfie-style shot) — image is NOT null. Keep the reply short, like you're sending it.\n`;
 
   return `${sceneBlock}\n${imageBlock}\nOUTPUT FORMAT — reply ONLY with strict JSON, nothing else:\n{"reply": "<what you say, in your voice>", "scene": "<one scene key, or null>", "image": null OR {"prompt": "<vivid visual description of what's in the photo>", "alt": "<2-4 word caption>"}}`;
 }
@@ -85,6 +86,8 @@ Deno.serve(async (req: Request) => {
     messages.push({ role: "system", content: `${name} just walked up to you. START the conversation yourself, like a real person — don't wait, don't just say hi. Open with something genuine and specific: what you're doing or thinking right now${act ? ` (you're ${act})` : ""}, a callback to something you've shared, a small thing you noticed, or a real question. Let the time of day color it.${gap} One or two sentences, in your voice.` });
   } else if (typeof s.userMessage === "string" && s.userMessage.trim()) {
     messages.push({ role: "user", content: s.userMessage });
+  } else if (s.wantPhoto) {
+    messages.push({ role: "user", content: "(he taps to see you)" });
   }
 
   // she directs the screen — ask for reply + scene as JSON

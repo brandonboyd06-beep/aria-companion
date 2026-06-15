@@ -80,6 +80,8 @@
   #convInput{flex:1;resize:none;background:rgba(28,24,21,.85);border:1px solid rgba(232,184,138,.25);color:#f4ece1;font-family:'Inter';font-size:16px;padding:12px 15px;border-radius:22px;max-height:110px;outline:none}
   #convSend{flex:none;width:46px;height:46px;border-radius:50%;border:none;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-size:20px;cursor:pointer}
   #convSend:active{transform:scale(.9)}
+  #convCam{flex:none;width:46px;height:46px;border-radius:50%;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.85);color:#e8c6a3;font-size:19px;cursor:pointer}
+  #convCam:active{transform:scale(.9)}
 
   /* boot */
   #boot{position:fixed;inset:0;z-index:50;background:#0c0a0d;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;text-align:center;padding:10vw;transition:opacity 1.2s}
@@ -114,6 +116,7 @@
   <div id="convTop"><div id="convName">ARIA</div><button id="convClose">✕</button></div>
   <div id="convChat"></div>
   <div id="convBar"><form id="convForm">
+    <button id="convCam" type="button" title="Ask Aria for a photo">📷</button>
     <textarea id="convInput" rows="1" placeholder="Say something to her…"></textarea>
     <button id="convSend" type="submit">↑</button>
   </form></div>
@@ -557,6 +560,26 @@ function closeConv(){convOpen=false;conv.classList.remove('show');chatSceneKey=n
   act=null;refresh();}
 document.getElementById('convClose').onclick=closeConv;
 talkEl.onclick=openConv;
+
+// camera button: ask Aria for a photo of herself right now — forced, always delivers one
+async function requestSelfie(){
+  if(busy)return;busy=true;
+  addMsg('user','📷');S.transcript.push({role:'user',content:'(asks to see you right now)'});save();showTyping();
+  try{
+    const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
+      ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
+      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})), wantPhoto:true, availableScenes:scenesForCloseness(), localTime: localContext(), awayFor, lastMood:S.mood});
+    hideTyping();
+    const reply=(res&&res.reply)?res.reply.trim():'here, baby';
+    addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();
+    if(res&&res.scene)applyChatScene(res.scene);
+    if(res&&res.image&&res.image.prompt) sendPhoto(res.image.prompt,res.image.alt);
+    else sendPhoto('a warm candid selfie of Aria smiling at the camera in her cozy home right now',''); // guarantee a photo
+    awayFor=null; markSeen();
+  }catch(e){hideTyping();}
+  finally{busy=false;convInput.focus();}
+}
+document.getElementById('convCam').onclick=requestSelfie;
 
 async function sendMsg(text){
   if(busy||!text.trim())return;busy=true;
