@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -9,6 +10,13 @@ const IMG_MODEL = "grok-imagine-image";
 // Aria's locked likeness — matches the woman in the app's scene videos/stills, so any
 // photo she "sends" is recognizably the same person. Applied only when a woman is in frame.
 const ARIA_LOOK = "a 28-year-old woman with fair lightly-freckled skin, warm hazel-green eyes, full lips, a soft natural smile, an oval face with gentle features, and shoulder-length wavy chestnut-brown hair parted in the middle, slim natural figure, soft natural makeup";
+
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -33,24 +41,34 @@ Deno.serve(async (req: Request) => {
     let data: any; try { data = JSON.parse(txt); } catch { data = null; }
     if (!r.ok || !data) return out({ error: "upstream", status: r.status, detail: txt.slice(0, 400) }, 502);
     const item = data?.data?.[0] || {};
-    let image: string | null = null;
+
+    // get the raw bytes (from xAI's url or inline b64)
+    let bytes: Uint8Array | null = null;
+    let ct = "image/jpeg";
     if (item.b64_json) {
-      image = "data:image/jpeg;base64," + item.b64_json;
+      bytes = b64ToBytes(item.b64_json);
     } else if (item.url) {
-      // inline the bytes as a data URL so the browser never has to hotlink xAI's image host
-      try {
-        const ir = await fetch(item.url);
-        if (ir.ok) {
-          const buf = new Uint8Array(await ir.arrayBuffer());
-          let bin = ""; const chunk = 0x8000;
-          for (let i = 0; i < buf.length; i += chunk) bin += String.fromCharCode(...buf.subarray(i, i + chunk));
-          const ct = ir.headers.get("content-type") || "image/jpeg";
-          image = `data:${ct};base64,${btoa(bin)}`;
-        } else { image = item.url; }
-      } catch { image = item.url; }
+      try { const ir = await fetch(item.url); if (ir.ok) { bytes = new Uint8Array(await ir.arrayBuffer()); ct = ir.headers.get("content-type") || ct; } } catch { /* ignore */ }
     }
-    if (!image) return out({ error: "no_image", detail: JSON.stringify(data).slice(0, 300) }, 502);
-    return out({ image, revised_prompt: item.revised_prompt || null });
+    if (!bytes) return out({ error: "no_image", detail: JSON.stringify(data).slice(0, 300) }, 502);
+
+    // upload to a public bucket and hand the browser a normal image URL (reliable on iOS,
+    // no data-URL size limits, no hotlinking, and it persists)
+    try {
+      const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const ext = ct.includes("png") ? "png" : "jpg";
+      const path = `${Date.now()}-${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await sb.storage.from("aria-photos").upload(path, bytes, { contentType: ct, upsert: false });
+      if (!upErr) {
+        const { data: pub } = sb.storage.from("aria-photos").getPublicUrl(path);
+        if (pub?.publicUrl) return out({ image: pub.publicUrl, revised_prompt: item.revised_prompt || null });
+      }
+    } catch { /* fall through to data URL */ }
+
+    // fallback: inline data URL
+    let bin = ""; const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    return out({ image: `data:${ct};base64,${btoa(bin)}`, revised_prompt: item.revised_prompt || null });
   } catch (e) {
     return out({ error: "fetch_failed", detail: String(e) }, 500);
   }
