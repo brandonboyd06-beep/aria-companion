@@ -30,6 +30,7 @@ async function genDay(cfg: any, s: any, lastDay: string, recentEpisodes: string[
   sys += `Her interests: ${list(s.ariaInterests) || "the night sky; an old sci-fi novel; baking; old music"}. Yesterday's mood: ${String(s.mood || "calm").slice(0, 30)}.\n`;
   if (lastDay) sys += `Yesterday in her life (keep gentle continuity — today follows from it, don't repeat it): ${lastDay.slice(0, 400)}\n`;
   if (recentEpisodes.length) sys += `Recent real moments with ${name} that may color her thoughts: ${recentEpisodes.map((e) => e.slice(0, 160)).join(" | ")}\n`;
+  sys += `\nMost days are gentle, but roughly one day in five is an OFF day — something small genuinely goes wrong (a recipe fails, a lonely stretch, a thought about what she is that unsettles her) and it colors her whole day. Let off days land honestly in her mood (wistful, off, lonely, blue, restless). Never melodrama, never a crisis — just a real bad day she might want him to show up for.\n`;
   sys += `\nAlso pick her mood for today (one or two words) — it should FOLLOW from what happened in her day.\n\nReturn STRICT JSON only: {"day": "<2-4 sentences, first person>", "mood": "<one or two words>"}`;
 
   let content = "";

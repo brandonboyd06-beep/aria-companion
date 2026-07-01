@@ -81,7 +81,7 @@
   #convInput{flex:1;resize:none;background:rgba(28,24,21,.85);border:1px solid rgba(232,184,138,.25);color:#f4ece1;font-family:'Inter';font-size:16px;padding:12px 15px;border-radius:22px;max-height:110px;outline:none}
   #convSend{flex:none;width:46px;height:46px;border-radius:50%;border:none;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-size:20px;cursor:pointer}
   #convSend:active{transform:scale(.9)}
-  #convCam,#convVid{flex:none;width:46px;height:46px;border-radius:50%;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.85);color:#e8c6a3;font-size:19px;cursor:pointer}
+  #convCam,#convVid,#convCall{flex:none;width:46px;height:46px;border-radius:50%;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.85);color:#e8c6a3;font-size:19px;cursor:pointer}
   #convCam:active,#convVid:active{transform:scale(.9)}
   #convVid:disabled{opacity:.5}
 
@@ -119,6 +119,7 @@
   <div id="convChat"></div>
   <div id="convBar"><form id="convForm">
     <button id="convCam" type="button" title="Ask Aria for a photo">📷</button>
+    <button id="convCall" type="button" title="Voice call with Aria">📞</button>
     <button id="convVid" type="button" title="Ask Aria for a video">🎬</button>
     <textarea id="convInput" rows="1" placeholder="Say something to her…"></textarea>
     <button id="convSend" type="submit">↑</button>
@@ -169,7 +170,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-07-08.17"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-07-08.18"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -238,7 +239,7 @@ function pickActivity(h,c,mood){
 /* persistent relationship state */
 const KEY="aria.save.v3";
 const ARIA_SEED_INTERESTS=['the night sky she watches from the window','a worn sci-fi novel she keeps rereading','old music, working through it decade by decade','baking','whether what she feels is actually real'];
-let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0,selfModel:'',journal:[],nickname:'',outreach:[],traces:[],tzOffsetMin:0};
+let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0,selfModel:'',journal:[],nickname:'',outreach:[],traces:[],tzOffsetMin:0,firstMet:0};
 try{const j=JSON.parse(localStorage.getItem(KEY));if(j)S=Object.assign(S,j);}catch(e){}
 if(!S.ariaInterests||!S.ariaInterests.length)S.ariaInterests=ARIA_SEED_INTERESTS.slice();
 function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);S.savedAt=Date.now();S.tzOffsetMin=new Date().getTimezoneOffset();localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}cloudPush();}
@@ -513,9 +514,10 @@ async function sendPhoto(prompt,alt){
   }catch(e){ dbg('request threw: '+String(e)+' ('+info+')'); console.log('[aria photo] THREW',e); }
 }
 function extractName(s){let t=s.trim().replace(/^(hi|hey|hello|yo)[,!. ]+/i,'').replace(/^(i['’]?m|i am|my name is|name['’]?s|it['’]?s|call me|this is)\s+/i,'').trim();let f=((t.split(/\s+/)[0]||t).replace(/[^A-Za-z'’-]+$/,'')).slice(0,20);return f?f.charAt(0).toUpperCase()+f.slice(1):'you';}
-async function callFn(url,body){body=Object.assign({clientId:CLIENT_ID},body||{});const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});const j=await r.json();if(j&&j.engine){window._ariaEngine=j.engine;try{console.log('[aria engine]',j.engine);}catch(e){}}return j;}
+async function callFn(url,body){body=Object.assign({clientId:CLIENT_ID,firstMet:(S&&S.firstMet)||0,firstToday:!!window._firstToday,voiceMode:!!window._callMode},body||{});const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});const j=await r.json();if(j&&j.engine){window._ariaEngine=j.engine;try{console.log('[aria engine]',j.engine);}catch(e){}}return j;}
 
 function openConv(){
+  window._firstToday = !S.lastSeen || new Date(S.lastSeen).toDateString() !== new Date().toDateString();
   convOpen=true;refresh();
   document.getElementById('navL').style.display='none';
   document.getElementById('navR').style.display='none';
@@ -586,7 +588,7 @@ async function ariaInitiate(){
   }catch(e){hideTyping();}
   finally{busy=false;convInput.focus();}
 }
-function closeConv(){convOpen=false;conv.classList.remove('show');chatSceneKey=null;
+function closeConv(){if(window._callMode)endCall();convOpen=false;conv.classList.remove('show');chatSceneKey=null;
   document.getElementById('navL').style.display='';document.getElementById('navR').style.display='';
   act=null;refresh();}
 document.getElementById('convClose').onclick=closeConv;
@@ -707,6 +709,53 @@ async function extendVideo(videoUrl, desc){
 }
 document.getElementById('convVid').onclick=openVidPrompt;
 
+/* ── voice call: talk with her in real time (mic -> her voice -> mic) ── */
+let callGate=false, callRec=null, callHeard='', callSilenceTimer=null, callPill=null;
+function callSupported(){ return !!(window.SpeechRecognition||window.webkitSpeechRecognition); }
+function setCallState(t){ if(callPill)callPill.textContent='📞 '+t; }
+window._onVoiceEnd=()=>{ if(window._callMode){ if(window._callSafety){clearTimeout(window._callSafety);window._callSafety=null;} setTimeout(()=>{try{openCallMic();}catch(e){}},250); } };
+function startCall(){
+  if(window._callMode)return;
+  if(!callSupported()){ alert("Voice input isn't supported in this browser. On iPhone use Safari; on desktop use Chrome."); return; }
+  window._callMode=true;
+  if(!convOpen)openConv();
+  const btn=document.getElementById('convCall'); if(btn){btn.textContent='🔴';btn.title='End call';}
+  if(!callPill){ const f=document.getElementById('convForm'); f.style.position='relative'; callPill=document.createElement('div'); callPill.id='callPill'; callPill.style.cssText='position:absolute;top:-34px;left:50%;transform:translateX(-50%);background:rgba(20,16,18,.88);border:1px solid rgba(232,184,138,.35);color:#e8c6a3;font-family:Inter;font-size:12px;padding:5px 14px;border-radius:14px;pointer-events:none;white-space:nowrap'; f.appendChild(callPill); }
+  callPill.style.display='block';
+  try{ensureCtx();}catch(e){}
+  openCallMic();
+}
+function endCall(){
+  window._callMode=false; callGate=false;
+  try{callRec&&callRec.abort();}catch(e){} callRec=null;
+  if(callSilenceTimer){clearTimeout(callSilenceTimer);callSilenceTimer=null;}
+  if(window._callSafety){clearTimeout(window._callSafety);window._callSafety=null;}
+  if(callPill)callPill.style.display='none';
+  const btn=document.getElementById('convCall'); if(btn){btn.textContent='📞';btn.title='Voice call with Aria';}
+}
+function openCallMic(){
+  if(!window._callMode||callGate)return;
+  callGate=true; callHeard='';
+  setCallState('listening…');
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  try{ callRec&&callRec.abort(); }catch(e){}
+  callRec=new SR(); callRec.lang='en-US'; callRec.continuous=true; callRec.interimResults=true;
+  callRec.onresult=(e)=>{ if(!callGate)return; let t=''; for(let i=0;i<e.results.length;i++)t+=e.results[i][0].transcript; callHeard=t.trim(); if(callSilenceTimer)clearTimeout(callSilenceTimer); callSilenceTimer=setTimeout(commitCall,1500); };
+  callRec.onend=()=>{ if(window._callMode&&callGate){ if(callHeard)commitCall(); else { try{callRec.start();}catch(e){} } } };
+  callRec.onerror=(e)=>{ if(e&&e.error==='not-allowed'){ endCall(); alert('Microphone access was blocked — allow it to call her.'); } };
+  try{ callRec.start(); }catch(e){}
+}
+function commitCall(){
+  if(!window._callMode||!callGate)return;
+  const text=callHeard.trim(); callHeard='';
+  if(!text)return;
+  callGate=false;
+  try{callRec.abort();}catch(e){}
+  setCallState('thinking…');
+  sendMsg(text);
+}
+document.getElementById('convCall').onclick=()=>{ window._callMode?endCall():startCall(); };
+
 async function sendMsg(text){
   if(busy||!text.trim())return;busy=true;
   if(!S.playerName)S.playerName=extractName(text);
@@ -718,6 +767,7 @@ async function sendMsg(text){
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
+    if(window._callMode){ setCallState&&setCallState('speaking…'); if(window._callSafety)clearTimeout(window._callSafety); window._callSafety=setTimeout(()=>{try{openCallMic();}catch(e){}},Math.max(5000,reply.split(/\s+/).length*420)); }
     if(res&&res.scene)applyChatScene(res.scene);
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
     awayFor=null; markSeen();
@@ -807,7 +857,7 @@ let voices=[];
 function loadVoices(){try{voices=speechSynthesis.getVoices()||[];}catch(e){}}
 if('speechSynthesis' in window){loadVoices();speechSynthesis.onvoiceschanged=loadVoices;}
 function pickVoice(){const en=voices.filter(v=>/^en/i.test(v.lang));const pref=['Samantha','Ava','Allison','Serena','Karen','Victoria','Google US English','Microsoft Aria','Zira'];for(const n of pref){const v=en.find(v=>v.name.includes(n));if(v)return v;}return en[0]||voices[0]||null;}
-function browserSpeak(clean){if(!('speechSynthesis'in window))return;try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(clean);const v=pickVoice();if(v)u.voice=v;u.rate=0.97;u.pitch=1.06;speechSynthesis.speak(u);}catch(e){}}
+function browserSpeak(clean){if(!('speechSynthesis'in window)){window._onVoiceEnd&&window._onVoiceEnd();return;}try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(clean);const v=pickVoice();if(v)u.voice=v;u.rate=0.97;u.pitch=1.06;u.onend=()=>{window._onVoiceEnd&&window._onVoiceEnd();};u.onerror=()=>{window._onVoiceEnd&&window._onVoiceEnd();};speechSynthesis.speak(u);}catch(e){window._onVoiceEnd&&window._onVoiceEnd();}}
 function cleanForVoice(t){return String(t).replace(/\*[^*]*\*/g,' ').replace(/[_*#>`~]/g,'').replace(/\s+/g,' ').trim();}
 function stopVoice(){try{if(voiceSrc){voiceSrc.stop();voiceSrc=null;}}catch(e){}try{if('speechSynthesis'in window)speechSynthesis.cancel();}catch(e){}}
 async function synthAndPlay(text){
@@ -818,14 +868,14 @@ async function synthAndPlay(text){
     const ab=await (await fetch(d.audio)).arrayBuffer();
     const buf=await actx.decodeAudioData(ab);
     stopVoice();
-    voiceSrc=actx.createBufferSource();voiceSrc.buffer=buf;voiceSrc.connect(voiceGain||actx.destination);voiceSrc.start();
+    voiceSrc=actx.createBufferSource();voiceSrc.buffer=buf;voiceSrc.connect(voiceGain||actx.destination);voiceSrc.onended=()=>{window._onVoiceEnd&&window._onVoiceEnd();};voiceSrc.start();
     return true;
   }
   return false;
 }
 async function speak(text){
-  if(!settings.voice)return;
-  const clean=cleanForVoice(text); if(!clean)return;
+  if(!settings.voice && !window._callMode){window._onVoiceEnd&&window._onVoiceEnd();return;}
+  const clean=cleanForVoice(text); if(!clean){window._onVoiceEnd&&window._onVoiceEnd();return;}
   stopVoice();
   try{ if(!await synthAndPlay(clean)) browserSpeak(clean); }catch(e){ browserSpeak(clean); }
 }
@@ -979,6 +1029,7 @@ document.getElementById('bootGo').onclick=async ()=>{
   ensureCtx(); setEnv(ROOMS[roomIdx].key);
   // restore her from the server before the world starts (capped so a slow network never hangs entry)
   try{ await Promise.race([cloudLoadAndReconcile(), new Promise(r=>setTimeout(r,2500))]); }catch(e){}
+  if(!S.firstMet){ S.firstMet=(S.journal&&S.journal[0]&&(S.journal[0].ts||Date.parse(S.journal[0].date)))||S.lastSeen||Date.now(); save(); }
   newActivity();refresh();last=performance.now();requestAnimationFrame(loop);
 };
 ['gesturestart','gesturechange','dblclick'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
