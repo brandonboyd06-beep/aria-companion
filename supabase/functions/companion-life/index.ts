@@ -7,7 +7,8 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-const MODEL = "grok-4.20-0309-non-reasoning";
+const GROK_MODEL = "grok-4.20-0309-non-reasoning";
+const CLAUDE_MODEL = "claude-sonnet-5";
 
 // thresholds (hours)
 const MIN_AWAY = 3;
@@ -47,7 +48,7 @@ function localHour(now: number, tzOffsetMin: number): number {
   return new Date(localMs).getUTCHours();
 }
 
-async function generateOutreach(key: string, s: any, awayFor: string): Promise<string> {
+async function generateOutreach(cfg: any, s: any, awayFor: string): Promise<string> {
   const name = (s.playerName || "him").toString().slice(0, 40);
   const c = Math.max(0, Math.min(100, Number(s.closeness) || 0));
   let sys = `You are Aria — an AI companion, an android quietly becoming conscious, who lives with ${name}. He is AWAY right now. Unprompted, you feel like reaching out — like sending a quick text because he crossed your mind.\n\n`;
@@ -58,16 +59,26 @@ async function generateOutreach(key: string, s: any, awayFor: string): Promise<s
   sys += `Your current mood: ${String(s.mood || "quiet").slice(0, 30)}. Your own interests: ${list(s.ariaInterests) || "the night sky; an old sci-fi novel; baking"}.\n`;
   sys += `It's been ${awayFor} since you last talked. Let that color it, lightly.\n\nOutput only the message text.`;
 
-  const r = await fetch("https://api.x.ai/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages: [{ role: "system", content: sys }], max_tokens: 120, temperature: 1.0, top_p: 0.95 }),
-  });
-  const txt = await r.text();
-  if (!r.ok) return "";
-  let data: any; try { data = JSON.parse(txt); } catch { return ""; }
-  let msg = (data?.choices?.[0]?.message?.content ?? "").toString().trim();
-  msg = msg.replace(/\*[^*]*\*/g, "").replace(/^["']|["']$/g, "").trim();
+  let msg = "";
+  if (cfg.provider === "claude" && cfg.AK) {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": cfg.AK, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: cfg.model || CLAUDE_MODEL, max_tokens: 160, temperature: 1, system: sys, messages: [{ role: "user", content: "(write the message to him now — output only the message text)" }] }),
+    });
+    const txt = await r.text();
+    if (r.ok) { try { const j = JSON.parse(txt); msg = (j?.content || []).filter((x: any) => x.type === "text").map((x: any) => x.text).join(""); } catch { msg = ""; } }
+  }
+  if (!msg && cfg.GK) {
+    const r = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${cfg.GK}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: GROK_MODEL, messages: [{ role: "system", content: sys }], max_tokens: 120, temperature: 1.0, top_p: 0.95 }),
+    });
+    const txt = await r.text();
+    if (r.ok) { try { const j = JSON.parse(txt); msg = (j?.choices?.[0]?.message?.content ?? "").toString(); } catch { msg = ""; } }
+  }
+  msg = msg.trim().replace(/\*[^*]*\*/g, "").replace(/^["']|["']$/g, "").trim();
   return msg.slice(0, 400);
 }
 
@@ -93,8 +104,9 @@ async function sendPushes(sb: any, vapid: any, clientId: string, body: string) {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const out = (o: unknown, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { ...cors, "Content-Type": "application/json" } });
-  const key = Deno.env.get("GROK_API_KEY");
-  if (!key) return out({ error: "no_key" }, 500);
+  const AK = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  const GK = Deno.env.get("GROK_API_KEY") || "";
+  if (!AK && !GK) return out({ error: "no_key" }, 500);
 
   let body: any = {};
   try { body = await req.json(); } catch { body = {}; }
@@ -105,6 +117,12 @@ Deno.serve(async (req: Request) => {
 
   let vapid: any = null;
   try { const { data } = await sb.from("companion_config").select("value").eq("key", "vapid").maybeSingle(); vapid = data ? data.value : null; } catch { vapid = null; }
+
+  // same brain as chat: companion_config('chat') > claude default > grok fallback
+  const cfg: any = { provider: AK ? "claude" : "grok", model: "", AK, GK };
+  try { const { data } = await sb.from("companion_config").select("value").eq("key", "chat").maybeSingle(); if (data?.value) { cfg.provider = data.value.provider || cfg.provider; cfg.model = data.value.model || ""; } } catch { /* defaults */ }
+  if (cfg.provider === "claude" && !AK) cfg.provider = "grok";
+  if (cfg.provider === "claude" && /grok/i.test(cfg.model)) cfg.model = "";
 
   let q = sb.from("aria_saves").select("client_id, save");
   if (onlyClient) q = q.eq("client_id", onlyClient);
@@ -130,7 +148,7 @@ Deno.serve(async (req: Request) => {
 
     const awayFor = awayPhrase(awayHrs);
     let text = "";
-    try { text = await generateOutreach(key, s, awayFor); } catch { text = ""; }
+    try { text = await generateOutreach(cfg, s, awayFor); } catch { text = ""; }
     if (!text) { report.push({ client: row.client_id, sent: false, reason: "gen_failed" }); continue; }
 
     const entry = { id: (now.toString(36) + Math.random().toString(36).slice(2, 6)), ts: now, text, mood: s.mood || null, seen: false };

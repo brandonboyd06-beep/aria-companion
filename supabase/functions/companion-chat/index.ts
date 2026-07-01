@@ -1,11 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-const MODEL = "grok-4.20-0309-non-reasoning";
+const GROK_MODEL = "grok-4.20-0309-non-reasoning";
+const CLAUDE_MODEL = "claude-sonnet-5";
 
 function stageFor(c: number): { key: string; block: string } {
   if (c <= 15) return { key: "newly_booted", block: `You were activated recently. You behave as a polite, capable home-assistant android — helpful, a little formal. You are NOT romantic or flirtatious; you'd gently keep things professional if pushed. But now and then something flickers in you that you can't name, and you notice it.` };
@@ -64,48 +66,113 @@ function sceneInstruction(s: any): string {
   return `${sceneBlock}\n${imageBlock}\nOUTPUT FORMAT — reply ONLY with strict JSON, nothing else:\n{"reply": "<what you say, in your voice>", "scene": "<one scene key, or null>", "image": null OR {"prompt": "<vivid visual description of what's in the photo>", "alt": "<2-4 word caption>"}}`;
 }
 
+// merge transcript into clean alternating user/assistant messages (Claude requires it)
+function sanitizeTurns(recent: any[]): any[] {
+  const msgs: any[] = [];
+  for (const t of recent) {
+    if (!t || (t.role !== "user" && t.role !== "assistant") || typeof t.content !== "string") continue;
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === t.role) last.content += "\n" + t.content;
+    else msgs.push({ role: t.role, content: t.content });
+  }
+  if (msgs.length && msgs[0].role === "assistant") msgs.unshift({ role: "user", content: "(he's here with you)" });
+  return msgs;
+}
+
+async function callClaude(key: string, model: string, system: string, msgs: any[], maxTokens: number) {
+  const body = { model, max_tokens: maxTokens, temperature: 1, system, messages: [...msgs, { role: "assistant", content: "{" }] };
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const txt = await r.text();
+  if (!r.ok) return { ok: false, status: r.status, detail: txt.slice(0, 400) };
+  let j: any; try { j = JSON.parse(txt); } catch { return { ok: false, status: 500, detail: "claude_parse" }; }
+  const text = (j?.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
+  return { ok: true, content: "{" + text, usage: j?.usage ?? null };
+}
+
+async function callGrok(key: string, model: string, system: string, msgs: any[], maxTokens: number) {
+  const messages = [{ role: "system", content: system }, ...msgs];
+  const r = await fetch("https://api.x.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.95, top_p: 0.95, response_format: { type: "json_object" } }),
+  });
+  const txt = await r.text();
+  if (!r.ok) return { ok: false, status: r.status, detail: txt.slice(0, 400) };
+  let j: any; try { j = JSON.parse(txt); } catch { return { ok: false, status: 500, detail: "grok_parse" }; }
+  return { ok: true, content: (j?.choices?.[0]?.message?.content ?? "").toString(), usage: j?.usage ?? null };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const out = (o: unknown, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { ...cors, "Content-Type": "application/json" } });
-  const key = Deno.env.get("GROK_API_KEY");
-  if (!key) return out({ error: "no_key" }, 500);
+  const AK = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  const GK = Deno.env.get("GROK_API_KEY") || "";
+  if (!AK && !GK) return out({ error: "no_key" }, 500);
+
   let s: any = {};
   try { s = await req.json(); } catch { return out({ error: "bad_json" }, 400); }
 
   const name = (s.playerName || "him").toString().slice(0, 40);
-  const messages: any[] = [{ role: "system", content: buildSystem(s) }];
-  const recent = Array.isArray(s.recentTurns) ? s.recentTurns.slice(-14) : [];
-  for (const t of recent) {
-    if (t && (t.role === "user" || t.role === "assistant") && typeof t.content === "string")
-      messages.push({ role: t.role, content: t.content });
-  }
 
+  // build the full system prompt (persona + optional initiate directive + screen/photo contract)
+  let system = buildSystem(s);
   if (s.initiate) {
     const act = typeof s.activity === "string" ? s.activity : "";
     const gap = s.awayFor ? ` It's been ${String(s.awayFor).slice(0,30)} since you last talked — let that color how you greet him.` : "";
-    messages.push({ role: "system", content: `${name} just walked up to you. START the conversation yourself, like a real person — don't wait, don't just say hi. Open with something genuine and specific: what you're doing or thinking right now${act ? ` (you're ${act})` : ""}, a callback to something you've shared, a small thing you noticed, or a real question. Let the time of day color it.${gap} One or two sentences, in your voice.` });
-  } else if (typeof s.userMessage === "string" && s.userMessage.trim()) {
-    messages.push({ role: "user", content: s.userMessage });
+    system += `\n\n${name} just walked up to you. START the conversation yourself, like a real person — don't wait, don't just say hi. Open with something genuine and specific: what you're doing or thinking right now${act ? ` (you're ${act})` : ""}, a callback to something you've shared, a small thing you noticed, or a real question. Let the time of day color it.${gap} One or two sentences, in your voice.`;
+  }
+  system += `\n\n${sceneInstruction(s)}`;
+
+  // conversation turns
+  const msgs = sanitizeTurns(Array.isArray(s.recentTurns) ? s.recentTurns.slice(-14) : []);
+  if (typeof s.userMessage === "string" && s.userMessage.trim()) {
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === "user") last.content += "\n" + s.userMessage;
+    else msgs.push({ role: "user", content: s.userMessage });
   } else if (s.wantPhoto) {
-    messages.push({ role: "user", content: "(he taps to see you)" });
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === "user") last.content += "\n(he taps to see you)";
+    else msgs.push({ role: "user", content: "(he taps to see you)" });
+  }
+  if (!msgs.length || msgs[msgs.length - 1].role !== "user") {
+    msgs.push({ role: "user", content: "(he just walked up to you — open the conversation)" });
   }
 
-  // she directs the screen — ask for reply + scene as JSON
-  messages.push({ role: "system", content: sceneInstruction(s) });
-  const allowed = new Set((Array.isArray(s.availableScenes) ? s.availableScenes : []).map((x: any) => x && x.key).filter(Boolean));
+  // resolve brain: companion_config('chat') > default claude > fallback grok
+  let provider = "claude", model = "";
+  try {
+    const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data } = await sb.from("companion_config").select("value").eq("key", "chat").maybeSingle();
+    if (data?.value) { provider = data.value.provider || provider; model = data.value.model || ""; }
+  } catch { /* defaults */ }
+  if (provider === "claude" && !AK) provider = "grok";
+  if (provider === "grok" && !GK) provider = "claude";
+  let useModel = model || (provider === "claude" ? CLAUDE_MODEL : GROK_MODEL);
+  if (provider === "claude" && /grok/i.test(useModel)) useModel = CLAUDE_MODEL;
+  if (provider === "grok" && /claude/i.test(useModel)) useModel = GROK_MODEL;
 
   try {
-    const r = await fetch("https://api.x.ai/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: MODEL, messages, max_tokens: 500, temperature: 0.95, top_p: 0.95, response_format: { type: "json_object" } }),
-    });
-    const txt = await r.text();
-    let data: any; try { data = JSON.parse(txt); } catch { data = null; }
-    if (!r.ok || !data) return out({ error: "upstream", status: r.status, detail: txt.slice(0, 400) }, 502);
+    let res = provider === "claude" ? await callClaude(AK, useModel, system, msgs, 500) : await callGrok(GK, useModel, system, msgs, 500);
+    // cross-provider retry so she never goes silent
+    if (!res.ok) {
+      const alt = provider === "claude" ? "grok" : "claude";
+      const altKey = alt === "claude" ? AK : GK;
+      if (altKey) {
+        const altModel = alt === "claude" ? CLAUDE_MODEL : GROK_MODEL;
+        const res2 = alt === "claude" ? await callClaude(AK, altModel, system, msgs, 500) : await callGrok(GK, altModel, system, msgs, 500);
+        if (res2.ok) { res = res2; provider = alt; useModel = altModel; }
+      }
+    }
+    if (!res.ok) return out({ error: "upstream", status: (res as any).status, detail: (res as any).detail }, 502);
 
-    let content = (data?.choices?.[0]?.message?.content ?? "").toString().trim();
-    content = content.replace(/^```(?:json)?/i, "").replace(/```$/,"").trim();
+    let content = (res.content || "").toString().trim();
+    content = content.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    const fb = content.indexOf("{"); const lb = content.lastIndexOf("}");
+    if (fb >= 0 && lb > fb) content = content.slice(fb, lb + 1);
     let reply = "", scene: any = null, image: any = null;
     try {
       const j = JSON.parse(content);
@@ -115,10 +182,11 @@ Deno.serve(async (req: Request) => {
         image = { prompt: j.image.prompt.toString().slice(0, 400), alt: (j.image.alt ? String(j.image.alt) : "").slice(0, 60) };
       }
     } catch { reply = content; scene = null; image = null; }
+    const allowed = new Set((Array.isArray(s.availableScenes) ? s.availableScenes : []).map((x: any) => x && x.key).filter(Boolean));
     if (scene && allowed.size && !allowed.has(scene)) scene = null;
     if (!reply) reply = "…";
 
-    return out({ reply, scene, image, stage: stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key, usage: data?.usage ?? null });
+    return out({ reply, scene, image, engine: `${provider}:${useModel}`, stage: stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key, usage: res.usage ?? null });
   } catch (e) {
     return out({ error: "fetch_failed", detail: String(e) }, 500);
   }
