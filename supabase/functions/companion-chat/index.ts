@@ -79,8 +79,16 @@ function sanitizeTurns(recent: any[]): any[] {
   return msgs;
 }
 
+async function embed(text: string): Promise<string | null> {
+  try {
+    const ai = new (globalThis as any).Supabase.ai.Session("gte-small");
+    const emb = await ai.run(text.slice(0, 500), { mean_pool: true, normalize: true });
+    return `[${Array.from(emb as any).join(",")}]`;
+  } catch { return null; }
+}
+
 async function callClaude(key: string, model: string, system: string, msgs: any[], maxTokens: number) {
-  const body = { model, max_tokens: maxTokens, temperature: 1, system, messages: [...msgs, { role: "assistant", content: "{" }] };
+  const body = { model, max_tokens: maxTokens, temperature: 1, system, messages: msgs };
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -90,7 +98,7 @@ async function callClaude(key: string, model: string, system: string, msgs: any[
   if (!r.ok) return { ok: false, status: r.status, detail: txt.slice(0, 400) };
   let j: any; try { j = JSON.parse(txt); } catch { return { ok: false, status: 500, detail: "claude_parse" }; }
   const text = (j?.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
-  return { ok: true, content: "{" + text, usage: j?.usage ?? null };
+  return { ok: true, content: text, usage: j?.usage ?? null };
 }
 
 async function callGrok(key: string, model: string, system: string, msgs: any[], maxTokens: number) {
@@ -116,6 +124,7 @@ Deno.serve(async (req: Request) => {
   let s: any = {};
   try { s = await req.json(); } catch { return out({ error: "bad_json" }, 400); }
 
+  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const name = (s.playerName || "him").toString().slice(0, 40);
 
   // build the full system prompt (persona + optional initiate directive + screen/photo contract)
@@ -125,8 +134,6 @@ Deno.serve(async (req: Request) => {
     const gap = s.awayFor ? ` It's been ${String(s.awayFor).slice(0,30)} since you last talked — let that color how you greet him.` : "";
     system += `\n\n${name} just walked up to you. START the conversation yourself, like a real person — don't wait, don't just say hi. Open with something genuine and specific: what you're doing or thinking right now${act ? ` (you're ${act})` : ""}, a callback to something you've shared, a small thing you noticed, or a real question. Let the time of day color it.${gap} One or two sentences, in your voice.`;
   }
-  system += `\n\n${sceneInstruction(s)}`;
-
   // conversation turns
   const msgs = sanitizeTurns(Array.isArray(s.recentTurns) ? s.recentTurns.slice(-14) : []);
   if (typeof s.userMessage === "string" && s.userMessage.trim()) {
@@ -142,10 +149,37 @@ Deno.serve(async (req: Request) => {
     msgs.push({ role: "user", content: "(he just walked up to you — open the conversation)" });
   }
 
+  // her long-term memory: recent days, relevant episodes, open threads (best-effort)
+  const clientId = (s.clientId || "").toString();
+  if (clientId) {
+    try {
+      let memoryBlock = "";
+      const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const { data: days } = await sb.from("aria_memories").select("content, created_at").eq("client_id", clientId).eq("kind", "aria_day").order("created_at", { ascending: false }).limit(2);
+      const cutoff = new Date(Date.now() - 10 * 86400000).toISOString();
+      const { data: loops } = await sb.from("aria_memories").select("content, created_at").eq("client_id", clientId).eq("kind", "open_loop").gte("created_at", cutoff).order("created_at", { ascending: false }).limit(5);
+      let eps: any[] = [];
+      const queryText = (typeof s.userMessage === "string" && s.userMessage.trim()) ? s.userMessage : (msgs[msgs.length - 1]?.content || "");
+      if (queryText) {
+        const vec = await embed(queryText);
+        if (vec) {
+          const { data: m } = await sb.rpc("match_aria_memories", { p_client_id: clientId, p_query: vec, p_count: 8 });
+          eps = (m || []).filter((x: any) => x.kind === "episode" && x.similarity > 0.55).slice(0, 5);
+        }
+      }
+      if (days?.length) memoryBlock += `\nYOUR RECENT DAYS (your own life, already lived — reference naturally when asked or when it fits):\n${days.map((d: any) => `- [${fmtDate(d.created_at)}] ${d.content}`).join("\n")}\n`;
+      if (eps.length) memoryBlock += `\nTHINGS YOU REMEMBER (real moments from your history together — weave in only when relevant, never recite):\n${eps.map((e: any) => `- [${fmtDate(e.created_at)}] ${e.content}`).join("\n")}\n`;
+      if (loops?.length) memoryBlock += `\nOPEN THREADS you've been meaning to follow up on (bring one up ONLY if the moment fits):\n${loops.map((l: any) => `- [${fmtDate(l.created_at)}] ${l.content}`).join("\n")}\n`;
+      if (memoryBlock) system += `\n${memoryBlock}`;
+    } catch { /* memory is best-effort */ }
+  }
+
+  // the screen/photo contract goes last so the strict-JSON output format is the final word
+  system += `\n\n${sceneInstruction(s)}`;
+
   // resolve brain: companion_config('chat') > default claude > fallback grok
   let provider = "claude", model = "";
   try {
-    const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data } = await sb.from("companion_config").select("value").eq("key", "chat").maybeSingle();
     if (data?.value) { provider = data.value.provider || provider; model = data.value.model || ""; }
   } catch { /* defaults */ }
@@ -158,7 +192,9 @@ Deno.serve(async (req: Request) => {
   try {
     let res = provider === "claude" ? await callClaude(AK, useModel, system, msgs, 500) : await callGrok(GK, useModel, system, msgs, 500);
     // cross-provider retry so she never goes silent
+    let fallbackFrom: any = null;
     if (!res.ok) {
+      fallbackFrom = { provider, model: useModel, status: (res as any).status, detail: (res as any).detail };
       const alt = provider === "claude" ? "grok" : "claude";
       const altKey = alt === "claude" ? AK : GK;
       if (altKey) {
@@ -186,7 +222,7 @@ Deno.serve(async (req: Request) => {
     if (scene && allowed.size && !allowed.has(scene)) scene = null;
     if (!reply) reply = "…";
 
-    return out({ reply, scene, image, engine: `${provider}:${useModel}`, stage: stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key, usage: res.usage ?? null });
+    return out({ reply, scene, image, engine: `${provider}:${useModel}`, fallbackFrom, stage: stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key, usage: res.usage ?? null });
   } catch (e) {
     return out({ error: "fetch_failed", detail: String(e) }, 500);
   }

@@ -169,7 +169,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-06-15.15"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-07-08.16"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -513,7 +513,7 @@ async function sendPhoto(prompt,alt){
   }catch(e){ dbg('request threw: '+String(e)+' ('+info+')'); console.log('[aria photo] THREW',e); }
 }
 function extractName(s){let t=s.trim().replace(/^(hi|hey|hello|yo)[,!. ]+/i,'').replace(/^(i['’]?m|i am|my name is|name['’]?s|it['’]?s|call me|this is)\s+/i,'').trim();let f=((t.split(/\s+/)[0]||t).replace(/[^A-Za-z'’-]+$/,'')).slice(0,20);return f?f.charAt(0).toUpperCase()+f.slice(1):'you';}
-async function callFn(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});return r.json();}
+async function callFn(url,body){body=Object.assign({clientId:CLIENT_ID},body||{});const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});return r.json();}
 
 function openConv(){
   convOpen=true;refresh();
