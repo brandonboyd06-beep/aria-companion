@@ -22,7 +22,8 @@
 <div id="stage"></div>
 <div id="status">loading her…</div>
 <div id="avaturnBox" hidden style="position:fixed;inset:0;z-index:50;background:#0c0a0d">
-  <button id="avaturnClose" style="position:absolute;top:max(10px,env(safe-area-inset-top));right:12px;z-index:51;width:36px;height:36px;border-radius:50%;border:1px solid rgba(232,184,138,.4);background:rgba(20,16,18,.85);color:#e8c6a3;font-size:16px;cursor:pointer">✕</button>
+  <button id="avaturnClose" style="position:absolute;top:max(10px,env(safe-area-inset-top));left:12px;z-index:51;width:36px;height:36px;border-radius:50%;border:1px solid rgba(232,184,138,.4);background:rgba(20,16,18,.85);color:#e8c6a3;font-size:16px;cursor:pointer">✕</button>
+  <button id="avaturnUse" style="position:absolute;bottom:max(14px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);z-index:51;padding:13px 26px;border-radius:24px;border:none;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-weight:700;font-size:15px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.5)">✓ Use this look</button>
   <div id="avaturnFrame" style="position:absolute;inset:0"></div>
 </div>
 <div id="bar">
@@ -167,25 +168,39 @@ async function idbPut(k,v){ const d=await idb(); return new Promise((res,rej)=>{
 async function idbGet(k){ const d=await idb(); return new Promise((res,rej)=>{ const t=d.transaction('kv','readonly'); const g=t.objectStore('kv').get(k); g.onsuccess=()=>res(g.result); g.onerror=()=>rej(g.error); }); }
 async function idbDel(k){ const d=await idb(); return new Promise((res,rej)=>{ const t=d.transaction('kv','readwrite'); t.objectStore('kv').delete(k); t.oncomplete=res; t.onerror=()=>rej(t.error); }); }
 
-let sdkStarted=false;
+let sdkStarted=false, sdkRef=null;
+async function applyExport(data){
+  document.getElementById('avaturnBox').hidden=true;
+  setStatus('bringing her in…');
+  try{
+    const u=(data&&(data.url||data.avatarUrl))||'';
+    if(!u)throw new Error('no url');
+    const resp=await fetch(u); const blob=await resp.blob();
+    try{ await idbPut('avatar', blob); }catch(e){}
+    await loadModel([URL.createObjectURL(blob)]);
+    applyMood();
+    setStatus('that’s her now — saved on this device');
+  }catch(e){ setStatus('couldn’t load her new look'); }
+}
 function openCreator(){
   document.getElementById('avaturnBox').hidden=false;
   if(sdkStarted)return; sdkStarted=true;
-  const sdk=new AvaturnSDK();
+  const sdk=new AvaturnSDK(); sdkRef=sdk;
   sdk.init(document.getElementById('avaturnFrame'),{url:'https://demo.avaturn.dev'}).then(()=>{
-    sdk.on('export', async (data)=>{
-      document.getElementById('avaturnBox').hidden=true;
-      setStatus('bringing her in…');
-      try{
-        const resp=await fetch(data.url); const blob=await resp.blob();
-        try{ await idbPut('avatar', blob); }catch(e){}
-        await loadModel([URL.createObjectURL(blob)]);
-        applyMood();
-      }catch(e){ setStatus('couldn’t load her new look'); }
-    });
+    sdk.on('export', (data)=>{ applyExport(data); });
   }).catch(()=>{ setStatus('avatar creator failed to load'); });
 }
 document.getElementById('avaturnClose').onclick=()=>{ document.getElementById('avaturnBox').hidden=true; };
+document.getElementById('avaturnUse').onclick=async ()=>{
+  const b=document.getElementById('avaturnUse');
+  b.disabled=true; b.textContent='exporting…';
+  try{
+    const data=await (sdkRef&&sdkRef.exportAvatar());
+    if(data) await applyExport(data);
+    else setStatus('export didn’t return an avatar — try the editor’s own Next/Export button');
+  }catch(e){ setStatus('export failed — try the editor’s own Next/Export button'); }
+  b.disabled=false; b.textContent='✓ Use this look';
+};
 
 function clearRig(){ if(rig){ try{scene.remove(rig.root);}catch(e){} rig=null; armSign=0; } }
 async function loadModel(urls){
