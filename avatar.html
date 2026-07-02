@@ -21,6 +21,10 @@
 <body>
 <div id="stage"></div>
 <div id="status">loading her…</div>
+<div id="avaturnBox" hidden style="position:fixed;inset:0;z-index:50;background:#0c0a0d">
+  <button id="avaturnClose" style="position:absolute;top:max(10px,env(safe-area-inset-top));right:12px;z-index:51;width:36px;height:36px;border-radius:50%;border:1px solid rgba(232,184,138,.4);background:rgba(20,16,18,.85);color:#e8c6a3;font-size:16px;cursor:pointer">✕</button>
+  <div id="avaturnFrame" style="position:absolute;inset:0"></div>
+</div>
 <div id="bar">
   <div id="moods">
     <button data-m="warm" class="on">Warm</button>
@@ -29,6 +33,7 @@
     <button data-m="sad">Sad</button>
     <button data-m="surprised">Surprised</button>
     <button data-m="wave">👋 Wave</button>
+    <button data-m="create">✨ New look</button>
   </div>
   <form id="say"><input id="sayInput" placeholder="type something for her to say out loud…"><button id="sayBtn" type="submit">Say it</button></form>
 </div>
@@ -47,6 +52,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { AvaturnSDK } from './vendor/avaturn-sdk.js';
 
 const SUPA="https://mymunodjaxymhbnhjwjx.supabase.co";
 const ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15bXVub2RqYXh5bWhibmhqd2p4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5ODY3ODIsImV4cCI6MjA5NDU2Mjc4Mn0.9LWApiBIhfw118d_NG6ossc_OWUZzt69kyij7NiVY38";
@@ -156,10 +162,37 @@ function relaxPose(){
   applyArms(armSign,a);
 }
 
-async function loadModel(){
+function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open('aria-avatar',1); r.onupgradeneeded=()=>r.result.createObjectStore('kv'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbPut(k,v){ const d=await idb(); return new Promise((res,rej)=>{ const t=d.transaction('kv','readwrite'); t.objectStore('kv').put(v,k); t.oncomplete=res; t.onerror=()=>rej(t.error); }); }
+async function idbGet(k){ const d=await idb(); return new Promise((res,rej)=>{ const t=d.transaction('kv','readonly'); const g=t.objectStore('kv').get(k); g.onsuccess=()=>res(g.result); g.onerror=()=>rej(g.error); }); }
+async function idbDel(k){ const d=await idb(); return new Promise((res,rej)=>{ const t=d.transaction('kv','readwrite'); t.objectStore('kv').delete(k); t.oncomplete=res; t.onerror=()=>rej(t.error); }); }
+
+let sdkStarted=false;
+function openCreator(){
+  document.getElementById('avaturnBox').hidden=false;
+  if(sdkStarted)return; sdkStarted=true;
+  const sdk=new AvaturnSDK();
+  sdk.init(document.getElementById('avaturnFrame'),{url:'https://demo.avaturn.dev'}).then(()=>{
+    sdk.on('export', async (data)=>{
+      document.getElementById('avaturnBox').hidden=true;
+      setStatus('bringing her in…');
+      try{
+        const resp=await fetch(data.url); const blob=await resp.blob();
+        try{ await idbPut('avatar', blob); }catch(e){}
+        await loadModel([URL.createObjectURL(blob)]);
+        applyMood();
+      }catch(e){ setStatus('couldn’t load her new look'); }
+    });
+  }).catch(()=>{ setStatus('avatar creator failed to load'); });
+}
+document.getElementById('avaturnClose').onclick=()=>{ document.getElementById('avaturnBox').hidden=true; };
+
+function clearRig(){ if(rig){ try{scene.remove(rig.root);}catch(e){} rig=null; armSign=0; } }
+async function loadModel(urls){
+  clearRig();
   const loader=new GLTFLoader();
   loader.register((p)=>new VRMLoaderPlugin(p));
-  for(const url of MODEL_URLS){
+  for(const url of (urls||MODEL_URLS)){
     try{
       setStatus('loading her…');
       const gltf=await loader.loadAsync(url);
@@ -223,6 +256,7 @@ document.getElementById('moods').addEventListener('click',(e)=>{
   const b=e.target.closest('button'); if(!b)return;
   const m=b.dataset.m;
   if(m==='wave'){ wave(); return; }
+  if(m==='create'){ openCreator(); return; }
   mood=m; applyMood();
   document.querySelectorAll('#moods button').forEach(x=>x.classList.toggle('on',x===b));
 });
@@ -314,7 +348,15 @@ function animate(){
   }
   renderer.render(scene,camera);
 }
-loadModel().then(()=>{ applyMood(); });
+(async ()=>{
+  let urls=MODEL_URLS;
+  if(qs.get('reset')==='1'){ try{await idbDel('avatar');}catch(e){} }
+  else if(!qs.get('glb') && !pick){
+    try{ const b=await idbGet('avatar'); if(b) urls=[URL.createObjectURL(b)]; }catch(e){}
+  }
+  await loadModel(urls);
+  applyMood();
+})();
 animate();
 </script>
 </body>
