@@ -45,17 +45,30 @@
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
 const SUPA="https://mymunodjaxymhbnhjwjx.supabase.co";
 const ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15bXVub2RqYXh5bWhibmhqd2p4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5ODY3ODIsImV4cCI6MjA5NDU2Mjc4Mn0.9LWApiBIhfw118d_NG6ossc_OWUZzt69kyij7NiVY38";
 const VOICE_URL=SUPA+"/functions/v1/companion-voice";
-const pick=new URLSearchParams(location.search).get('m');
-const MODEL_URLS=pick?["./vendor/models/"+pick+".vrm"]:[
+
+// model resolution: ?glb=<url> (persisted) > ?m=<vendored vrm> > default vrm list
+const qs=new URLSearchParams(location.search);
+function normalizeGlbUrl(u){
+  if(/models\.readyplayer\.me\/[^?]+\.glb/.test(u) && !/morphTargets/.test(u)) return u+(u.includes('?')?'&':'?')+'morphTargets=ARKit,Oculus%20Visemes';
+  return u;
+}
+let GLB_URL=qs.get('glb')||'';
+if(GLB_URL){ try{localStorage.setItem('aria.avatar.glb',GLB_URL);}catch(e){} }
+else { try{ if(!qs.get('m')) GLB_URL=localStorage.getItem('aria.avatar.glb')||''; }catch(e){} }
+if(qs.get('reset')==='1'){ GLB_URL=''; try{localStorage.removeItem('aria.avatar.glb');}catch(e){} }
+const pick=qs.get('m');
+const ARM_OVERRIDE=parseFloat(qs.get('arms')||'');
+const MODEL_URLS=GLB_URL?[normalizeGlbUrl(GLB_URL)]:(pick?["./vendor/models/"+pick+".vrm"]:[
   "./vendor/models/twist.vrm",
   "./vendor/models/alicia.vrm",
   "./vendor/models/seed.vrm"
-];
+]);
 
 const statusEl=document.getElementById('status');
 const setStatus=(t)=>{statusEl.textContent=t;};
@@ -69,19 +82,80 @@ document.getElementById('stage').appendChild(renderer.domElement);
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x14100e);
 scene.fog=new THREE.Fog(0x14100e,3,9);
+// image-based lighting so realistic PBR avatars (Ready Player Me) don't render flat
+try{
+  const pmrem=new THREE.PMREMGenerator(renderer);
+  scene.environment=pmrem.fromScene(new RoomEnvironment(renderer),0.04).texture;
+}catch(e){}
 const camera=new THREE.PerspectiveCamera(28,innerWidth/innerHeight,0.1,50);
 camera.position.set(0,1.32,1.55);
-// warm lamp-lit look
-const key=new THREE.DirectionalLight(0xffd9b0,1.6); key.position.set(0.8,1.8,1.4); scene.add(key);
-const fill=new THREE.DirectionalLight(0x8fa8ff,0.5); fill.position.set(-1.2,1.2,0.6); scene.add(fill);
-scene.add(new THREE.AmbientLight(0x604a3a,0.9));
+const key=new THREE.DirectionalLight(0xffd9b0,1.4); key.position.set(0.8,1.8,1.4); scene.add(key);
+const fill=new THREE.DirectionalLight(0x8fa8ff,0.4); fill.position.set(-1.2,1.2,0.6); scene.add(fill);
+scene.add(new THREE.AmbientLight(0x604a3a,0.7));
 const floor=new THREE.Mesh(new THREE.CircleGeometry(3,48),new THREE.MeshBasicMaterial({color:0x0f0c0a}));
 floor.rotation.x=-Math.PI/2; scene.add(floor);
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 
-// ── load VRM (try candidates in order) ──
-let vrm=null, exprNames=new Set();
+// ── the rig: one abstraction over VRM (anime) and GLB/ARKit (realistic, e.g. Ready Player Me) ──
+let rig=null;
 const lookAtTarget=new THREE.Object3D(); camera.add(lookAtTarget); scene.add(camera);
+
+const GLB_BONES={ head:'Head', neck:'Neck', chest:'Spine2', spine:'Spine',
+  leftUpperArm:'LeftArm', rightUpperArm:'RightArm', leftLowerArm:'LeftForeArm', rightLowerArm:'RightForeArm',
+  leftHand:'LeftHand', rightHand:'RightHand', leftEye:'LeftEye', rightEye:'RightEye' };
+const GLB_EXPR={
+  blink:[['eyeBlinkLeft',1],['eyeBlinkRight',1]],
+  aa:[['jawOpen',0.8],['mouthOpen',0.6]],
+  happy:[['mouthSmileLeft',0.9],['mouthSmileRight',0.9],['cheekSquintLeft',0.3],['cheekSquintRight',0.3]],
+  relaxed:[['mouthSmileLeft',0.45],['mouthSmileRight',0.45]],
+  sad:[['mouthFrownLeft',0.8],['mouthFrownRight',0.8],['browInnerUp',0.7]],
+  surprised:[['browInnerUp',0.8],['browOuterUpLeft',0.8],['browOuterUpRight',0.8],['eyeWideLeft',0.7],['eyeWideRight',0.7],['jawOpen',0.25]],
+  angry:[['browDownLeft',0.8],['browDownRight',0.8]],
+};
+
+function bone(n){
+  if(!rig)return null;
+  if(rig.kind==='vrm'){ try{ return rig.vrm.humanoid.getNormalizedBoneNode(n); }catch(e){ return null; } }
+  const name=GLB_BONES[n]||n; return rig.bonesByName[name]||rig.bonesByName['mixamorig'+name]||rig.bonesByName['mixamorig:'+name]||null;
+}
+function setExpr(name,val){
+  if(!rig)return;
+  if(rig.kind==='vrm'){ try{ rig.vrm.expressionManager.setValue(name,val); }catch(e){} return; }
+  const targets=GLB_EXPR[name]; if(!targets)return;
+  for(const [morph,w] of targets){
+    const hits=rig.morphs[morph]; if(!hits)continue;
+    for(const h of hits) h.mesh.morphTargetInfluences[h.idx]=val*w;
+  }
+}
+function poseSign(){
+  if(!rig)return -1;
+  if(rig.kind==='vrm'){ try{ return (rig.vrm.meta && String(rig.vrm.meta.metaVersion)==='0') ? 1 : -1; }catch(e){ return -1; } }
+  return 1; // GLB (mixamo-style) T-pose: left arm +X, +Z rotation brings it down
+}
+let armSign=0; // resolved once per model: whichever direction puts her hands DOWN
+function applyArms(sgn,a){
+  const l=bone('leftUpperArm'), r=bone('rightUpperArm');
+  const ll=bone('leftLowerArm'), rl=bone('rightLowerArm');
+  if(l)l.rotation.z=sgn*a; if(r)r.rotation.z=-sgn*a;
+  if(ll)ll.rotation.z=sgn*0.15; if(rl)rl.rotation.z=-sgn*0.15;
+}
+function worldY(b){ if(!b)return 0; b.updateWorldMatrix(true,false); const v=new THREE.Vector3(); b.getWorldPosition(v); return v.y; }
+function relaxPose(){
+  const a=isNaN(ARM_OVERRIDE)?1.15:Math.abs(ARM_OVERRIDE);
+  if(!armSign){
+    // try the guess, then verify: if her hand ended up above her shoulder, flip it
+    let sgn=(!isNaN(ARM_OVERRIDE)&&ARM_OVERRIDE<0)?-poseSign():poseSign();
+    applyArms(sgn,a);
+    try{
+      rig.root.updateMatrixWorld(true);
+      const hand=bone('leftHand'), sh=bone('leftUpperArm');
+      if(hand&&sh&&worldY(hand)>worldY(sh)-0.05){ sgn=-sgn; }
+    }catch(e){}
+    armSign=sgn;
+  }
+  applyArms(armSign,a);
+}
+
 async function loadModel(){
   const loader=new GLTFLoader();
   loader.register((p)=>new VRMLoaderPlugin(p));
@@ -90,45 +164,47 @@ async function loadModel(){
       setStatus('loading her…');
       const gltf=await loader.loadAsync(url);
       const v=gltf.userData.vrm;
-      if(!v)continue;
-      VRMUtils.removeUnnecessaryVertices(gltf.scene);
-      VRMUtils.combineSkeletons(gltf.scene);
-      if(VRMUtils.rotateVRM0)VRMUtils.rotateVRM0(v);
-      scene.add(v.scene);
-      vrm=v;
-      try{ vrm.lookAt.target=lookAtTarget; }catch(e){}
-      // catalogue available expressions
-      try{ Object.keys(vrm.expressionManager.expressionMap).forEach(k=>exprNames.add(k)); }catch(e){}
-      // drop the T-pose: relax arms to her sides
+      if(v){
+        VRMUtils.removeUnnecessaryVertices(gltf.scene);
+        VRMUtils.combineSkeletons(gltf.scene);
+        if(VRMUtils.rotateVRM0)VRMUtils.rotateVRM0(v);
+        scene.add(v.scene);
+        rig={kind:'vrm',vrm:v,root:v.scene};
+        try{ v.lookAt.target=lookAtTarget; }catch(e){}
+      } else {
+        const root=gltf.scene;
+        const bonesByName={}, morphs={};
+        root.traverse((o)=>{
+          if(o.isBone||o.type==='Bone')bonesByName[o.name]=o;
+          if(o.morphTargetDictionary){
+            for(const [k,idx] of Object.entries(o.morphTargetDictionary)){
+              (morphs[k]=morphs[k]||[]).push({mesh:o,idx});
+            }
+          }
+          if(o.isMesh){o.frustumCulled=false;}
+        });
+        scene.add(root);
+        rig={kind:'glb',root,bonesByName,morphs};
+        console.log('glb morphs:',Object.keys(morphs).length,'bones:',Object.keys(bonesByName).length);
+      }
       relaxPose();
-      // frame her face
       try{
-        const head=vrm.humanoid.getNormalizedBoneNode('head');
-        const p=new THREE.Vector3(); head.getWorldPosition(p);
+        const head=bone('head');
+        const p=new THREE.Vector3(); head.updateWorldMatrix(true,false); head.getWorldPosition(p);
         camera.position.set(0,p.y-0.02,1.15);
         camera.lookAt(0,p.y-0.06,0);
       }catch(e){}
       window.__vrmReady=true;
-      setStatus('she’s here — move your finger, she follows');
+      setStatus(rig.kind==='glb'?'she\u2019s here (realistic rig) \u2014 she follows your finger':'she\u2019s here \u2014 move your finger, she follows');
       return true;
     }catch(e){ console.log('model failed',url,e&&e.message); }
   }
   window.__vrmError=true;
-  setStatus('couldn’t load the avatar model');
+  setStatus('couldn\u2019t load the avatar model');
   return false;
 }
-function bone(n){ try{ return vrm.humanoid.getNormalizedBoneNode(n); }catch(e){ return null; } }
-function poseSign(){ try{ return (vrm.meta && String(vrm.meta.metaVersion)==='0') ? 1 : -1; }catch(e){ return -1; } }
-function relaxPose(){
-  const sgn=poseSign();
-  const l=bone('leftUpperArm'), r=bone('rightUpperArm');
-  const ll=bone('leftLowerArm'), rl=bone('rightLowerArm');
-  if(l)l.rotation.z=sgn*1.15; if(r)r.rotation.z=-sgn*1.15;
-  if(ll)ll.rotation.z=sgn*0.18; if(rl)rl.rotation.z=-sgn*0.18;
-}
 
-// ── expression helpers ──
-function setExpr(name,val){ try{ vrm.expressionManager.setValue(name,val); }catch(e){} }
+// ── moods ──
 let mood='warm';
 const MOODS={
   warm:{happy:0.35,relaxed:0.25},
@@ -138,7 +214,7 @@ const MOODS={
   surprised:{surprised:0.85},
 };
 function applyMood(){
-  if(!vrm)return;
+  if(!rig)return;
   ['happy','relaxed','sad','surprised','angry'].forEach(k=>setExpr(k,0));
   const m=MOODS[mood]||{};
   Object.entries(m).forEach(([k,v])=>setExpr(k,v));
@@ -151,7 +227,6 @@ document.getElementById('moods').addEventListener('click',(e)=>{
   document.querySelectorAll('#moods button').forEach(x=>x.classList.toggle('on',x===b));
 });
 
-// ── wave gesture (procedural) ──
 let waveT=0;
 function wave(){ waveT=2.2; }
 
@@ -165,9 +240,9 @@ addEventListener('touchmove',(e)=>{const t=e.touches[0]; if(t)onPoint(t.clientX,
 let actx=null, analyser=null, talking=false;
 function ensureCtx(){ if(!actx){ actx=new (window.AudioContext||window.webkitAudioContext)(); } if(actx.state==='suspended')actx.resume(); }
 async function sayIt(text){
-  if(!text.trim()||!vrm)return;
+  if(!text.trim()||!rig)return;
   ensureCtx();
-  setStatus('…');
+  setStatus('\u2026');
   try{
     const r=await fetch(VOICE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({text, rpVoice:'English_Soft-spokenGirl', speed:0.95})});
     const d=await r.json();
@@ -177,8 +252,8 @@ async function sayIt(text){
     const src=actx.createBufferSource(); src.buffer=buf;
     analyser=actx.createAnalyser(); analyser.fftSize=512;
     src.connect(analyser); analyser.connect(actx.destination);
-    talking=true; setStatus('she’s talking to you');
-    src.onended=()=>{ talking=false; analyser=null; setExpr('aa',0); setStatus('she’s listening'); };
+    talking=true; setStatus('she\u2019s talking to you');
+    src.onended=()=>{ talking=false; analyser=null; setExpr('aa',0); setStatus('she\u2019s listening'); };
     src.start();
   }catch(e){ setStatus('voice failed'); }
 }
@@ -188,7 +263,7 @@ document.getElementById('say').addEventListener('submit',(e)=>{
   sayIt(i.value); i.value='';
 });
 
-// ── the life loop: breathing, blinking, sway, gaze, lips ──
+// ── the life loop ──
 const clock=new THREE.Clock();
 let blinkTimer=1.5+Math.random()*3, blinkPhase=0;
 const lipData=new Uint8Array(256);
@@ -196,8 +271,7 @@ function animate(){
   requestAnimationFrame(animate);
   const dt=Math.min(clock.getDelta(),0.05);
   const t=clock.elapsedTime;
-  if(vrm){
-    // breathing: chest + slight head bob
+  if(rig){
     const chest=bone('chest')||bone('spine');
     if(chest)chest.rotation.x=Math.sin(t*1.5)*0.018;
     const head=bone('head');
@@ -208,9 +282,13 @@ function animate(){
     }
     const spine=bone('spine');
     if(spine)spine.rotation.z=Math.sin(t*0.25)*0.02;
-    // gaze target follows pointer (in camera space just in front of the lens)
+    // eyes: VRM has a lookAt system; realistic rigs get direct eye-bone gaze
     lookAtTarget.position.set(px*0.35,-py*0.28,0);
-    // blinking
+    if(rig.kind==='glb'){
+      const le=bone('leftEye'), re=bone('rightEye');
+      if(le){ le.rotation.y=px*0.25; le.rotation.x=py*0.12; }
+      if(re){ re.rotation.y=px*0.25; re.rotation.x=py*0.12; }
+    }
     blinkTimer-=dt;
     if(blinkTimer<=0){ blinkPhase=0.18; blinkTimer=2+Math.random()*3.5; }
     if(blinkPhase>0){
@@ -218,7 +296,6 @@ function animate(){
       const v=Math.sin(Math.PI*Math.max(0,blinkPhase)/0.18);
       setExpr('blink',v);
     } else setExpr('blink',0);
-    // live lip sync from her actual audio
     if(talking&&analyser){
       analyser.getByteTimeDomainData(lipData);
       let sum=0; for(let i=0;i<lipData.length;i++){const d=(lipData[i]-128)/128; sum+=d*d;}
@@ -226,15 +303,14 @@ function animate(){
       const open=Math.min(1,Math.max(0,(rms-0.02)*9));
       setExpr('aa',open);
     }
-    // wave gesture overrides right arm briefly
     if(waveT>0){
       waveT-=dt;
       const r=bone('rightUpperArm'), rl=bone('rightLowerArm');
-      if(r)r.rotation.z=-poseSign()*2.4;
+      if(r)r.rotation.z=-(armSign||poseSign())*2.4;
       if(rl)rl.rotation.z=Math.sin(t*10)*0.5-0.3;
       if(waveT<=0)relaxPose();
     }
-    vrm.update(dt);
+    if(rig.kind==='vrm')rig.vrm.update(dt);
   }
   renderer.render(scene,camera);
 }
