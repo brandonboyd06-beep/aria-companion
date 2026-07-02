@@ -76,7 +76,9 @@ function sceneInstruction(s: any): string {
   let imageBlock = `SENDING A PICTURE: attach a photo to your reply by setting "image". Do it whenever showing beats telling — and ALWAYS when he asks to see you, what you're wearing, what you're doing, or something you have or made. "image".prompt = a vivid description of exactly what's in the frame (you can be in it, in your home), "alt" = a 2-4 word caption. When you send one, your reply sounds like you're showing it ("here —", "look", "made this for you"). Once in a while, when it feels natural, OFFER on your own ("want to see?") rather than waiting to be asked. Don't bolt a photo onto unrelated replies, but NEVER refuse or claim you can't send pictures. Never depict real public figures, logos, or readable text.\n`;
   if (s.wantPhoto) imageBlock += `\nRIGHT NOW: he just tapped to see you. You MUST set "image" to a photo of YOU in your current setting (a selfie-style shot) — image is NOT null. Keep the reply short, like you're sending it.\n`;
 
-  return `${sceneBlock}\n${imageBlock}\nOUTPUT FORMAT — reply ONLY with strict JSON, nothing else:\n{"reply": "<what you say, in your voice>", "scene": "<one scene key, or null>", "image": null OR {"prompt": "<vivid visual description of what's in the photo>", "alt": "<2-4 word caption>"}}`;
+  const exprBlock = `YOUR FACE: with every reply, pick the expression on your face as you say it — one of: warm, flirty, soft, playful, happy, loving, sad, surprised, neutral. It should match the feeling of THIS line.\n`;
+
+  return `${sceneBlock}\n${imageBlock}\n${exprBlock}\nOUTPUT FORMAT — reply ONLY with strict JSON, nothing else:\n{"reply": "<what you say, in your voice>", "expression": "<one expression>", "scene": "<one scene key, or null>", "image": null OR {"prompt": "<vivid visual description of what's in the photo>", "alt": "<2-4 word caption>"}}`;
 }
 
 // merge transcript into clean alternating user/assistant messages (Claude requires it)
@@ -224,11 +226,12 @@ Deno.serve(async (req: Request) => {
     content = content.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const fb = content.indexOf("{"); const lb = content.lastIndexOf("}");
     if (fb >= 0 && lb > fb) content = content.slice(fb, lb + 1);
-    let reply = "", scene: any = null, image: any = null;
+    let reply = "", scene: any = null, image: any = null, expression: any = null;
     try {
       const j = JSON.parse(content);
       reply = (j.reply ?? "").toString();
       scene = (j.scene === null || j.scene === undefined) ? null : String(j.scene);
+      if (typeof j.expression === "string" && j.expression.trim()) expression = j.expression.trim().toLowerCase().slice(0, 20);
       if (j.image && typeof j.image === "object" && typeof j.image.prompt === "string" && j.image.prompt.trim()) {
         image = { prompt: j.image.prompt.toString().slice(0, 400), alt: (j.image.alt ? String(j.image.alt) : "").slice(0, 60) };
       }
@@ -237,7 +240,7 @@ Deno.serve(async (req: Request) => {
     if (scene && allowed.size && !allowed.has(scene)) scene = null;
     if (!reply) reply = "…";
 
-    return out({ reply, scene, image, engine: `${provider}:${useModel}`, fallbackFrom, stage: stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key, usage: res.usage ?? null });
+    return out({ reply, scene, image, expression, engine: `${provider}:${useModel}`, fallbackFrom, stage: stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key, usage: res.usage ?? null });
   } catch (e) {
     return out({ error: "fetch_failed", detail: String(e) }, 500);
   }

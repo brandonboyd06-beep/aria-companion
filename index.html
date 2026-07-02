@@ -100,6 +100,7 @@
 <div id="tod"></div>
 <div id="vig"></div>
 <div id="walkLayer"></div>
+<div id="avatarStage" style="position:fixed;inset:0;z-index:2;display:none;background:#14100e"></div>
 
 <div id="hud"><div id="room">Living room</div></div>
 <div id="clock">—</div>
@@ -161,6 +162,157 @@
   <div class="go" id="bootGo">Come home</div>
 </div>
 
+<script type="importmap">
+{"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/jsm/","@pixiv/three-vrm":"./vendor/three-vrm.module.min.js"}}
+</script>
+<script type="module">
+// ── Aria's living avatar: replaces the frozen scene during conversation ──
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+
+const GLB_BONES={ head:'Head', neck:'Neck', chest:'Spine2', spine:'Spine',
+  leftUpperArm:'LeftArm', rightUpperArm:'RightArm', leftLowerArm:'LeftForeArm', rightLowerArm:'RightForeArm',
+  leftHand:'LeftHand', rightHand:'RightHand', leftEye:'LeftEye', rightEye:'RightEye' };
+const GLB_EXPR={
+  blink:[['eyeBlinkLeft',1],['eyeBlinkRight',1]],
+  aa:[['jawOpen',0.8],['mouthOpen',0.6]],
+  happy:[['mouthSmileLeft',0.9],['mouthSmileRight',0.9],['cheekSquintLeft',0.3],['cheekSquintRight',0.3]],
+  relaxed:[['mouthSmileLeft',0.45],['mouthSmileRight',0.45]],
+  sad:[['mouthFrownLeft',0.8],['mouthFrownRight',0.8],['browInnerUp',0.7]],
+  surprised:[['browInnerUp',0.8],['browOuterUpLeft',0.8],['browOuterUpRight',0.8],['eyeWideLeft',0.7],['eyeWideRight',0.7],['jawOpen',0.25]],
+  angry:[['browDownLeft',0.8],['browDownRight',0.8]],
+};
+const MOODS={
+  warm:{happy:0.35,relaxed:0.25}, flirty:{happy:0.5,relaxed:0.6}, soft:{relaxed:0.5},
+  playful:{happy:0.7}, happy:{happy:0.8}, loving:{happy:0.4,relaxed:0.5},
+  sad:{sad:0.7}, surprised:{surprised:0.85}, neutral:{},
+};
+const SCENE_MOOD={ flirty:'flirty', dressed_up:'flirty', loving:'loving', close:'loving', missing:'loving',
+  playful:'playful', dancing:'happy', happy:'happy', baking:'happy', pool:'playful',
+  thoughtful:'soft', sad:'sad', reading:'soft', cozy:'soft', morning:'soft', yoga:'soft' };
+
+let inited=false, visible=false, rig=null, armSign=0, mood='warm';
+let renderer, scene, camera, lookAtTarget, clock;
+let blinkTimer=2, blinkPhase=0;
+let analyser=null, fakeUntil=0;
+const lipData=new Uint8Array(256);
+let px=0, py=0;
+addEventListener('pointermove',(e)=>{px=(e.clientX/innerWidth)*2-1;py=(e.clientY/innerHeight)*2-1;},{passive:true});
+addEventListener('touchmove',(e)=>{const t=e.touches[0]; if(t){px=(t.clientX/innerWidth)*2-1;py=(t.clientY/innerHeight)*2-1;}},{passive:true});
+
+function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open('aria-avatar',1); r.onupgradeneeded=()=>r.result.createObjectStore('kv'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbGet(k){ try{ const d=await idb(); return await new Promise((res,rej)=>{ const g=d.transaction('kv','readonly').objectStore('kv').get(k); g.onsuccess=()=>res(g.result); g.onerror=()=>rej(g.error); }); }catch(e){ return null; } }
+
+function bone(n){
+  if(!rig)return null;
+  if(rig.kind==='vrm'){ try{ return rig.vrm.humanoid.getNormalizedBoneNode(n); }catch(e){ return null; } }
+  const name=GLB_BONES[n]||n; return rig.bonesByName[name]||rig.bonesByName['mixamorig'+name]||null;
+}
+function setExpr(name,val){
+  if(!rig)return;
+  if(rig.kind==='vrm'){ try{ rig.vrm.expressionManager.setValue(name,val); }catch(e){} return; }
+  const targets=GLB_EXPR[name]; if(!targets)return;
+  for(const [morph,w] of targets){ const hits=rig.morphs[morph]; if(!hits)continue; for(const h of hits) h.mesh.morphTargetInfluences[h.idx]=val*w; }
+}
+function applyMood(){
+  if(!rig)return;
+  ['happy','relaxed','sad','surprised','angry'].forEach(k=>setExpr(k,0));
+  Object.entries(MOODS[mood]||{}).forEach(([k,v])=>setExpr(k,v));
+}
+function applyArms(sgn,a){
+  const l=bone('leftUpperArm'), r=bone('rightUpperArm'), ll=bone('leftLowerArm'), rl=bone('rightLowerArm');
+  if(l)l.rotation.z=sgn*a; if(r)r.rotation.z=-sgn*a;
+  if(ll)ll.rotation.z=sgn*0.15; if(rl)rl.rotation.z=-sgn*0.15;
+}
+function worldY(b){ if(!b)return 0; b.updateWorldMatrix(true,false); const v=new THREE.Vector3(); b.getWorldPosition(v); return v.y; }
+function relaxPose(){
+  if(!armSign){
+    let sgn=(rig.kind==='vrm' && rig.vrm.meta && String(rig.vrm.meta.metaVersion)==='0')?1:(rig.kind==='vrm'?-1:1);
+    applyArms(sgn,1.15);
+    try{ rig.root.updateMatrixWorld(true); const hand=bone('leftHand'), sh=bone('leftUpperArm'); if(hand&&sh&&worldY(hand)>worldY(sh)-0.05){ sgn=-sgn; } }catch(e){}
+    armSign=sgn;
+  }
+  applyArms(armSign,1.15);
+}
+async function init(){
+  if(inited)return; inited=true;
+  const stage=document.getElementById('avatarStage');
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(2,devicePixelRatio));
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.outputColorSpace=THREE.SRGBColorSpace;
+  stage.appendChild(renderer.domElement);
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x14100e);
+  scene.fog=new THREE.Fog(0x14100e,3,9);
+  try{ const pm=new THREE.PMREMGenerator(renderer); scene.environment=pm.fromScene(new RoomEnvironment(renderer),0.04).texture; }catch(e){}
+  camera=new THREE.PerspectiveCamera(28,innerWidth/innerHeight,0.1,50);
+  camera.position.set(0,1.32,1.55);
+  lookAtTarget=new THREE.Object3D(); camera.add(lookAtTarget); scene.add(camera);
+  const keyL=new THREE.DirectionalLight(0xffd9b0,1.4); keyL.position.set(0.8,1.8,1.4); scene.add(keyL);
+  const fillL=new THREE.DirectionalLight(0x8fa8ff,0.4); fillL.position.set(-1.2,1.2,0.6); scene.add(fillL);
+  scene.add(new THREE.AmbientLight(0x604a3a,0.7));
+  addEventListener('resize',()=>{ if(!renderer)return; camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+  clock=new THREE.Clock();
+  // her look: the avatar created on /avatar.html (shared storage) or the bundled fallback
+  const blob=await idbGet('avatar');
+  const urls=blob?[URL.createObjectURL(blob)]:['./vendor/models/twist.vrm'];
+  const loader=new GLTFLoader(); loader.register((p)=>new VRMLoaderPlugin(p));
+  for(const url of urls.concat(['./vendor/models/twist.vrm'])){
+    try{
+      const gltf=await loader.loadAsync(url);
+      const v=gltf.userData.vrm;
+      if(v){ VRMUtils.removeUnnecessaryVertices(gltf.scene); VRMUtils.combineSkeletons(gltf.scene); if(VRMUtils.rotateVRM0)VRMUtils.rotateVRM0(v); scene.add(v.scene); rig={kind:'vrm',vrm:v,root:v.scene}; try{v.lookAt.target=lookAtTarget;}catch(e){} }
+      else{
+        const root=gltf.scene, bonesByName={}, morphs={};
+        root.traverse((o)=>{ if(o.isBone||o.type==='Bone')bonesByName[o.name]=o;
+          if(o.morphTargetDictionary){ for(const [k,idx] of Object.entries(o.morphTargetDictionary)){ (morphs[k]=morphs[k]||[]).push({mesh:o,idx}); } }
+          if(o.isMesh)o.frustumCulled=false; });
+        scene.add(root); rig={kind:'glb',root,bonesByName,morphs};
+      }
+      relaxPose();
+      try{ const head=bone('head'); const hp=new THREE.Vector3(); head.updateWorldMatrix(true,false); head.getWorldPosition(hp); camera.position.set(0,hp.y-0.02,1.15); camera.lookAt(0,hp.y-0.06,0); }catch(e){}
+      break;
+    }catch(e){ console.log('[avatar] load failed',url); }
+  }
+  applyMood();
+  animate();
+}
+function animate(){
+  requestAnimationFrame(animate);
+  if(!visible||!rig)return;
+  const dt=Math.min(clock.getDelta(),0.05), t=clock.elapsedTime;
+  const chest=bone('chest')||bone('spine'); if(chest)chest.rotation.x=Math.sin(t*1.5)*0.018;
+  const head=bone('head'); if(head){ head.rotation.z=Math.sin(t*0.4)*0.03; head.rotation.x=Math.sin(t*0.9)*0.012+py*0.12; head.rotation.y=px*0.22; }
+  const spine=bone('spine'); if(spine)spine.rotation.z=Math.sin(t*0.25)*0.02;
+  lookAtTarget.position.set(px*0.35,-py*0.28,0);
+  if(rig.kind==='glb'){ const le=bone('leftEye'), re=bone('rightEye'); if(le){le.rotation.y=px*0.25;le.rotation.x=py*0.12;} if(re){re.rotation.y=px*0.25;re.rotation.x=py*0.12;} }
+  blinkTimer-=dt;
+  if(blinkTimer<=0){ blinkPhase=0.18; blinkTimer=2+Math.random()*3.5; }
+  if(blinkPhase>0){ blinkPhase-=dt; setExpr('blink',Math.sin(Math.PI*Math.max(0,blinkPhase)/0.18)); } else setExpr('blink',0);
+  if(analyser){
+    analyser.getByteTimeDomainData(lipData);
+    let sum=0; for(let i=0;i<lipData.length;i++){const d=(lipData[i]-128)/128; sum+=d*d;}
+    setExpr('aa',Math.min(1,Math.max(0,(Math.sqrt(sum/lipData.length)-0.02)*9)));
+  } else if(fakeUntil>Date.now()){
+    setExpr('aa',0.25+0.35*Math.abs(Math.sin(t*9)));
+  } else setExpr('aa',0);
+  if(rig.kind==='vrm')rig.vrm.update(dt);
+  renderer.render(scene,camera);
+}
+window.AriaAvatar={
+  show(){ visible=true; document.getElementById('avatarStage').style.display='block'; init(); },
+  hide(){ visible=false; const st=document.getElementById('avatarStage'); if(st)st.style.display='none'; this.stopTalking(); },
+  visible(){ return visible; },
+  setMood(m){ if(MOODS[m]!==undefined){ mood=m; applyMood(); } },
+  setMoodForScene(k){ const m=SCENE_MOOD[k]; if(m)this.setMood(m); },
+  talkWith(an){ analyser=an; fakeUntil=0; },
+  stopTalking(){ analyser=null; fakeUntil=0; if(rig)setExpr('aa',0); },
+  fakeTalk(ms){ analyser=null; fakeUntil=Date.now()+Math.max(500,ms|0); },
+};
+</script>
 <script>
 "use strict";
 (()=>{
@@ -170,7 +322,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-07-08.18"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-07-09.19"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -519,6 +671,7 @@ async function callFn(url,body){body=Object.assign({clientId:CLIENT_ID,firstMet:
 function openConv(){
   window._firstToday = !S.lastSeen || new Date(S.lastSeen).toDateString() !== new Date().toDateString();
   convOpen=true;refresh();
+  if(window.AriaAvatar)window.AriaAvatar.show();
   document.getElementById('navL').style.display='none';
   document.getElementById('navR').style.display='none';
   conv.classList.add('show'); // scene stays live behind the chat
@@ -567,6 +720,7 @@ function scenesForCloseness(){ return CHAT_SCENES.filter(s=>(s.min||0)<=S.closen
 let chatSceneKey=null;
 function applyChatScene(key){
   if(!key||key==='null')return;
+  if(window.AriaAvatar&&window.AriaAvatar.visible()){ window.AriaAvatar.setMoodForScene(key); return; }
   const s=CHAT_SCENES.find(x=>x.key===key); if(!s)return;
   if(key===chatSceneKey)return;            // already showing it
   chatSceneKey=key;
@@ -582,13 +736,14 @@ async function ariaInitiate(){
       initiate:true, activity: act?act.k:'', localTime: localContext(), awayFor, lastMood:S.mood});
     hideTyping();
     if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();}
+    if(res&&res.expression&&window.AriaAvatar)window.AriaAvatar.setMood(res.expression);
     if(res&&res.scene)applyChatScene(res.scene);
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
     awayFor=null; markSeen();
   }catch(e){hideTyping();}
   finally{busy=false;convInput.focus();}
 }
-function closeConv(){if(window._callMode)endCall();convOpen=false;conv.classList.remove('show');chatSceneKey=null;
+function closeConv(){if(window._callMode)endCall();if(window.AriaAvatar)window.AriaAvatar.hide();convOpen=false;conv.classList.remove('show');chatSceneKey=null;
   document.getElementById('navL').style.display='';document.getElementById('navR').style.display='';
   act=null;refresh();}
 document.getElementById('convClose').onclick=closeConv;
@@ -605,6 +760,7 @@ async function requestSelfie(){
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'here, baby';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();
+    if(res&&res.expression&&window.AriaAvatar)window.AriaAvatar.setMood(res.expression);
     if(res&&res.scene)applyChatScene(res.scene);
     if(res&&res.image&&res.image.prompt) sendPhoto(res.image.prompt,res.image.alt);
     else sendPhoto('a warm candid selfie of Aria smiling at the camera in her cozy home right now',''); // guarantee a photo
@@ -767,6 +923,7 @@ async function sendMsg(text){
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
+    if(res&&res.expression&&window.AriaAvatar)window.AriaAvatar.setMood(res.expression);
     if(window._callMode){ setCallState&&setCallState('speaking…'); if(window._callSafety)clearTimeout(window._callSafety); window._callSafety=setTimeout(()=>{try{openCallMic();}catch(e){}},Math.max(5000,reply.split(/\s+/).length*420)); }
     if(res&&res.scene)applyChatScene(res.scene);
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
@@ -857,7 +1014,7 @@ let voices=[];
 function loadVoices(){try{voices=speechSynthesis.getVoices()||[];}catch(e){}}
 if('speechSynthesis' in window){loadVoices();speechSynthesis.onvoiceschanged=loadVoices;}
 function pickVoice(){const en=voices.filter(v=>/^en/i.test(v.lang));const pref=['Samantha','Ava','Allison','Serena','Karen','Victoria','Google US English','Microsoft Aria','Zira'];for(const n of pref){const v=en.find(v=>v.name.includes(n));if(v)return v;}return en[0]||voices[0]||null;}
-function browserSpeak(clean){if(!('speechSynthesis'in window)){window._onVoiceEnd&&window._onVoiceEnd();return;}try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(clean);const v=pickVoice();if(v)u.voice=v;u.rate=0.97;u.pitch=1.06;u.onend=()=>{window._onVoiceEnd&&window._onVoiceEnd();};u.onerror=()=>{window._onVoiceEnd&&window._onVoiceEnd();};speechSynthesis.speak(u);}catch(e){window._onVoiceEnd&&window._onVoiceEnd();}}
+function browserSpeak(clean){if(!('speechSynthesis'in window)){window._onVoiceEnd&&window._onVoiceEnd();return;}try{speechSynthesis.cancel();window.AriaAvatar&&window.AriaAvatar.fakeTalk(Math.max(1500,clean.split(/\s+/).length*350));const u=new SpeechSynthesisUtterance(clean);const v=pickVoice();if(v)u.voice=v;u.rate=0.97;u.pitch=1.06;u.onend=()=>{window.AriaAvatar&&window.AriaAvatar.stopTalking();window._onVoiceEnd&&window._onVoiceEnd();};u.onerror=()=>{window.AriaAvatar&&window.AriaAvatar.stopTalking();window._onVoiceEnd&&window._onVoiceEnd();};speechSynthesis.speak(u);}catch(e){window._onVoiceEnd&&window._onVoiceEnd();}}
 function cleanForVoice(t){return String(t).replace(/\*[^*]*\*/g,' ').replace(/[_*#>`~]/g,'').replace(/\s+/g,' ').trim();}
 function stopVoice(){try{if(voiceSrc){voiceSrc.stop();voiceSrc=null;}}catch(e){}try{if('speechSynthesis'in window)speechSynthesis.cancel();}catch(e){}}
 async function synthAndPlay(text){
@@ -868,7 +1025,9 @@ async function synthAndPlay(text){
     const ab=await (await fetch(d.audio)).arrayBuffer();
     const buf=await actx.decodeAudioData(ab);
     stopVoice();
-    voiceSrc=actx.createBufferSource();voiceSrc.buffer=buf;voiceSrc.connect(voiceGain||actx.destination);voiceSrc.onended=()=>{window._onVoiceEnd&&window._onVoiceEnd();};voiceSrc.start();
+    voiceSrc=actx.createBufferSource();voiceSrc.buffer=buf;voiceSrc.connect(voiceGain||actx.destination);
+    if(window.AriaAvatar&&window.AriaAvatar.visible()){try{const an=actx.createAnalyser();an.fftSize=512;voiceSrc.connect(an);window.AriaAvatar.talkWith(an);}catch(e){}}
+    voiceSrc.onended=()=>{window.AriaAvatar&&window.AriaAvatar.stopTalking();window._onVoiceEnd&&window._onVoiceEnd();};voiceSrc.start();
     return true;
   }
   return false;
