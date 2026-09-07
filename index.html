@@ -182,7 +182,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.27"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.28"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -511,6 +511,47 @@ _lb.innerHTML='<img id="lightboxImg" style="max-width:96vw;max-height:92vh;borde
 document.body.appendChild(_lb);
 _lb.onclick=()=>{ _lb.style.display='none'; document.getElementById('lightboxImg').src=''; };
 function openLightbox(src){ document.getElementById('lightboxImg').src=src; _lb.style.display='flex'; }
+// a photo bubble: the picture, its caption, and what he can do with it (animate it, ask her to change it)
+function renderPhotoInto(d, url, alt, onError){
+  d.className='msg';d.style.cssText='align-self:flex-start;max-width:82%';d.innerHTML='';
+  const im=document.createElement('img');im.alt=alt||'';
+  im.style.cssText='display:block;width:240px;max-width:78vw;height:auto;border-radius:14px;border:1px solid rgba(232,184,138,.35);cursor:zoom-in';
+  im.onclick=()=>openLightbox(url);
+  im.onload=()=>{console.log('[aria photo] loaded',im.naturalWidth+'x'+im.naturalHeight);convChat.scrollTop=convChat.scrollHeight;libDirty=true;};
+  im.onerror=()=>{ if(onError)onError(); console.log('[aria photo] IMG ERROR',url); };
+  im.src=url;
+  d.appendChild(im);
+  if(alt){const c=document.createElement('div');c.style.cssText='font-family:Newsreader,serif;font-style:italic;font-size:13px;color:#cdb89a;margin-top:4px';c.textContent=alt;d.appendChild(c);}
+  const row=document.createElement('div'); row.style.cssText='display:flex;gap:6px;margin-top:6px;flex-wrap:wrap';
+  const bs='padding:6px 12px;border-radius:10px;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.7);color:#e8c6a3;font-family:Inter;font-size:12px;cursor:pointer';
+  const mv=document.createElement('button');mv.textContent='🎬 Make it move';mv.style.cssText=bs;mv.onclick=()=>openVidPrompt(url);row.appendChild(mv);
+  const ed=document.createElement('button');ed.textContent='✏️ Change it';ed.style.cssText=bs;ed.onclick=()=>openEditPrompt(url);row.appendChild(ed);
+  d.appendChild(row);
+}
+// ask her to change a photo: she redoes it with the edit applied (same woman, same scene unless asked)
+let editBusy=false;
+async function editPhoto(url, instruction){
+  instruction=(instruction||'').toString().trim(); if(!instruction||editBusy)return; editBusy=true;
+  addMsg('user','✏️ '+instruction); S.transcript.push({role:'user',content:'(asks you to change the photo: '+instruction+')'}); save();
+  let reply='mm, hold on — let me fix that for you.';
+  try{
+    const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
+      ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
+      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})), userMessage:'(he asks you to redo the last photo with a change: '+instruction+' — one short line in your voice as you do it; do not attach a new image, it is being edited for you)', availableScenes:scenesForCloseness(), localTime: localContext(), awayFor, lastMood:S.mood});
+    if(res&&res.reply)reply=res.reply.trim();
+    if(res&&res.scene)applyChatScene(res.scene);
+  }catch(e){}
+  addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();markSeen();
+  const d=document.createElement('div');d.className='msg photo loading';d.innerHTML='<div class="ph">redoing it…</div>';
+  convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;
+  try{
+    const r=await fetch(IMG_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({action:'edit', imageUrl:url, prompt:instruction, alt:instruction.slice(0,60), source:'edit', clientId:CLIENT_ID})});
+    let j=null; try{ j=await r.json(); }catch(e){}
+    if(j&&j.image){ renderPhotoInto(d, j.image, instruction.slice(0,60), ()=>{ d.className='msg aria'; d.style.fontSize='12px'; d.textContent='*that edit didn’t come through — try again*'; }); }
+    else { d.className='msg aria'; d.style.fontSize='12px'; d.textContent='*couldn’t make that change — try wording it differently*'; console.log('[aria edit] failed',j); }
+  }catch(e){ d.className='msg aria'; d.style.fontSize='12px'; d.textContent='*that edit didn’t send*'; }
+  editBusy=false;
+}
 // she sends a picture: render a developing placeholder, generate, then reveal it
 async function sendPhoto(prompt,alt,source){
   if(!prompt)return;
@@ -526,20 +567,7 @@ async function sendPhoto(prompt,alt,source){
     console.log('[aria photo] response',info,j);
     if(j&&j.image){
       info+=' / img '+(/^https?:/.test(j.image)?'url':'data')+' len'+String(j.image).length;
-      d.className='msg';d.style.cssText='align-self:flex-start;max-width:82%';d.innerHTML='';
-      const im=document.createElement('img');im.alt=alt||'';
-      im.style.cssText='display:block;width:240px;max-width:78vw;height:auto;border-radius:14px;border:1px solid rgba(232,184,138,.35);cursor:zoom-in';
-      im.onclick=()=>openLightbox(j.image);
-      im.onload=()=>{console.log('[aria photo] loaded',im.naturalWidth+'x'+im.naturalHeight);convChat.scrollTop=convChat.scrollHeight;libDirty=true;};
-      im.onerror=()=>{ dbg('the photo didn’t come through — tap 📷 to try again'); console.log('[aria photo] IMG ERROR',info,j.image); };
-      im.src=j.image;
-      d.appendChild(im);
-      if(alt){const c=document.createElement('div');c.style.cssText='font-family:Newsreader,serif;font-style:italic;font-size:13px;color:#cdb89a;margin-top:4px';c.textContent=alt;d.appendChild(c);}
-      // turn THIS photo into a video
-      const mv=document.createElement('button');mv.textContent='🎬 Make it move';
-      mv.style.cssText='display:block;margin-top:6px;padding:6px 12px;border-radius:10px;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.7);color:#e8c6a3;font-family:Inter;font-size:12px;cursor:pointer';
-      mv.onclick=()=>openVidPrompt(j.image);
-      d.appendChild(mv);
+      renderPhotoInto(d, j.image, alt, ()=>dbg('the photo didn’t come through — tap 📷 to try again'));
     } else { dbg('no image in response. '+info+' body='+JSON.stringify(j).slice(0,120)); }
   }catch(e){ dbg('request threw: '+String(e)+' ('+info+')'); console.log('[aria photo] THREW',e); }
 }
@@ -614,6 +642,7 @@ async function ariaInitiate(){
     if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();}
     if(res&&res.scene)applyChatScene(res.scene);
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
+    if(res&&res.video&&res.video.prompt)setTimeout(()=>requestVideo(res.video.prompt,null,{fromDirective:true}),50);
     awayFor=null; markSeen();
   }catch(e){hideTyping();}
   finally{busy=false;convInput.focus();runQueuedSelfie();}
@@ -662,29 +691,33 @@ _vp.innerHTML='<div style="background:rgba(20,16,18,.97);border:1px solid rgba(2
 document.body.appendChild(_vp);
 let _vpSeed=null;   // optional seed image (animate an existing photo)
 let _vpExtend=null; // optional source video (extend an existing clip)
+let _vpEdit=null;   // optional photo to change (ask her for an edit)
+function openEditPrompt(url){ if(editBusy)return; _vpEdit=url||null; _vpSeed=null; _vpExtend=null; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder='what should change? e.g. make it red lace, put me by the pool, let my hair down'; document.querySelector('#vidPrompt div div').textContent='What should she change?'; document.getElementById('vidPromptGo').textContent='Change it ✏️'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
 function closeVidPrompt(){ _vp.style.display='none'; }
-function openVidPrompt(seedUrl){ if(videoBusy)return; if(typeof seedUrl!=='string'||!/^https?:/.test(seedUrl))seedUrl=null; _vpSeed=seedUrl||null; _vpExtend=null; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder=_vpSeed?'how should this photo move? e.g. turn around slowly':'describe the video… e.g. blow me a kiss from the kitchen'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
-function openExtendPrompt(videoUrl){ if(videoBusy)return; _vpExtend=videoUrl||null; _vpSeed=null; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder='what happens next? e.g. she turns and walks closer'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
+function openVidPrompt(seedUrl){ if(videoBusy)return; if(typeof seedUrl!=='string'||!/^https?:/.test(seedUrl))seedUrl=null; _vpSeed=seedUrl||null; _vpExtend=null; _vpEdit=null; document.querySelector('#vidPrompt div div').textContent='What do you want her to send?'; document.getElementById('vidPromptGo').textContent='Send 🎬'; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder=_vpSeed?'how should this photo move? e.g. turn around slowly':'describe the video… e.g. blow me a kiss from the kitchen'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
+function openExtendPrompt(videoUrl){ if(videoBusy)return; _vpExtend=videoUrl||null; _vpSeed=null; _vpEdit=null; document.querySelector('#vidPrompt div div').textContent='What do you want her to send?'; document.getElementById('vidPromptGo').textContent='Send 🎬'; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder='what happens next? e.g. she turns and walks closer'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
 _vp.addEventListener('click',(e)=>{ if(e.target===_vp)closeVidPrompt(); });
 document.getElementById('vidPromptCancel').onclick=closeVidPrompt;
-document.getElementById('vidPromptGo').onclick=()=>{ const d=document.getElementById('vidPromptInput').value.trim(); const seed=_vpSeed, ext=_vpExtend; closeVidPrompt(); if(ext)extendVideo(ext,d); else requestVideo(d, seed); };
+document.getElementById('vidPromptGo').onclick=()=>{ const d=document.getElementById('vidPromptInput').value.trim(); const seed=_vpSeed, ext=_vpExtend, ed=_vpEdit; closeVidPrompt(); if(ed){ editPhoto(ed, d); return; } if(ext)extendVideo(ext,d); else requestVideo(d, seed); };
 document.getElementById('vidPromptInput').addEventListener('keydown',(e)=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); document.getElementById('vidPromptGo').click(); } });
 
-async function requestVideo(desc, seedUrl){
-  if(videoBusy)return; videoBusy=true;
+async function requestVideo(desc, seedUrl, opts){
+  if(videoBusy)return; videoBusy=true; opts=opts||{};
   desc=(desc||'').toString().trim();
   const vbtn=document.getElementById('convVid'); if(vbtn)vbtn.disabled=true;
-  addMsg('user', desc?('🎬 '+desc):'🎬');S.transcript.push({role:'user',content: desc?('(asks for a video: '+desc+')'):'(asks for a video of you)'});save();
-  // a short in-character line up front
   let reply='give me a sec, baby…';
+  if(!opts.fromDirective){
+  addMsg('user', desc?('🎬 '+desc):'🎬');S.transcript.push({role:'user',content: desc?('(asks for a video: '+desc+')'):'(asks for a video of you)'});save();
+  // a short in-character line up front (she knows she is filming; the server fills "video" and never lets her say she can't)
   try{
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
       ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
-      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})), userMessage:(desc?('(make me a short video of you: '+desc+')'):'(make me a short video of you right now)'), availableScenes:scenesForCloseness(), localTime: localContext(), awayFor, lastMood:S.mood});
+      recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})), wantVideo:true, videoDesc:desc||'', availableScenes:scenesForCloseness(), localTime: localContext(), awayFor, lastMood:S.mood});
     if(res&&res.reply)reply=res.reply.trim();
     if(res&&res.scene)applyChatScene(res.scene);
   }catch(e){}
   addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();markSeen();
+  }
   // placeholder bubble
   const d=document.createElement('div');d.className='msg';d.style.cssText='align-self:flex-start;max-width:82%;font-size:13px;color:#cdb89a;font-family:Newsreader,serif;font-style:italic';
   d.textContent='🎬 filming a little something… (this takes a minute or two)';
@@ -802,6 +835,7 @@ async function sendMsg(text){
     if(window._callMode){ setCallState&&setCallState('speaking…'); if(window._callSafety)clearTimeout(window._callSafety); window._callSafety=setTimeout(()=>{try{openCallMic();}catch(e){}},Math.max(5000,reply.split(/\s+/).length*420)); }
     if(res&&res.scene)applyChatScene(res.scene);
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
+    if(res&&res.video&&res.video.prompt)setTimeout(()=>requestVideo(res.video.prompt,null,{fromDirective:true}),50);
     awayFor=null; markSeen();
     if(S.sinceReflect>=4)doReflect();
   }catch(e){hideTyping();addMsg('assistant','*Something flickers.* Sorry — try again?');}
@@ -1105,7 +1139,7 @@ function openLibDetail(it){
   document.getElementById('ldDate').textContent=libFmtDate(it.created_at);
   const acts=document.getElementById('ldActs'); acts.innerHTML='';
   const mk=(label,fn)=>{ const b=document.createElement('button'); b.className='libAct'; b.textContent=label; b.onclick=fn; acts.appendChild(b); return b; };
-  if(it.kind==='photo') mk('🎬 Make it move',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openVidPrompt(it.url); });
+  if(it.kind==='photo'){ mk('🎬 Make it move',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openVidPrompt(it.url); }); mk('✏️ Change it',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openEditPrompt(it.url); }); }
   else mk('➕ Extend',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openExtendPrompt(it.url); });
   mk('↗ Open',()=>{ try{ window.open(it.url,'_blank'); }catch(e){} });
   const del=mk('🗑 Delete',async ()=>{ if(!confirm('Remove this from her library? (the file itself stays)'))return; del.disabled=true; try{ const r=await callFn(MEDIA_URL,{action:'delete',id:it.id}); if(r&&r.ok){ libItems=libItems.filter(x=>x.id!==it.id); renderLib(); closeLibDetail(); } }catch(e){} del.disabled=false; });
