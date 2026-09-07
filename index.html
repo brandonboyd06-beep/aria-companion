@@ -171,6 +171,7 @@
   <p>You live here. So does Aria — an assistant who isn't quite sure what she is yet.</p>
   <p style="font-size:12px;opacity:.7">Use the arrows to move between rooms. Find her, and talk. She has her own evening to live.</p>
   <div class="go" id="bootGo">Come home</div>
+  <div id="bootLink" style="margin-top:14px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8a7f73;cursor:pointer;display:none">Already have Aria on another device?</div>
 </div>
 
 <script>
@@ -182,7 +183,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.28"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.29"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -192,8 +193,29 @@ try{
   if(!CLIENT_ID){
     CLIENT_ID=localStorage.getItem("aria.client_id")||((window.crypto&&crypto.randomUUID)?crypto.randomUUID():(Date.now().toString(36)+Math.random().toString(36).slice(2)));
     localStorage.setItem("aria.account_id",CLIENT_ID);
+    window._freshAccount=true;
   }
 }catch(e){}
+// a second copy of the account id in IndexedDB: if localStorage is ever wiped but IndexedDB survives,
+// the next boot re-adopts the old Aria instead of quietly starting a new one
+(function(){
+  try{
+    const r=indexedDB.open('aria-account',1);
+    r.onupgradeneeded=()=>r.result.createObjectStore('kv');
+    r.onsuccess=()=>{
+      const db=r.result;
+      const g=db.transaction('kv','readonly').objectStore('kv').get('account_id');
+      g.onsuccess=()=>{
+        const old=g.result;
+        if(window._freshAccount && old && old!==CLIENT_ID){
+          try{ localStorage.setItem('aria.account_id',old); localStorage.removeItem(KEY); }catch(e){}
+          location.reload(); return;
+        }
+        try{ db.transaction('kv','readwrite').objectStore('kv').put(CLIENT_ID,'account_id'); }catch(e){}
+      };
+    };
+  }catch(e){}
+})();
 
 /* rooms (navigation order) */
 const ROOMS=[
@@ -1015,6 +1037,14 @@ if(enablePushBtn){ enablePushBtn.onclick=enablePush; refreshPushBtn(); }
 function syncHint(t){ const e=document.getElementById('syncHint'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
 (function initSync(){
   const codeEl=document.getElementById('syncCode'); if(codeEl)codeEl.value=CLIENT_ID;
+  // opened from a link like /?link=<code> (e.g. sent from another device): adopt that Aria here
+  try{
+    const qp=new URLSearchParams(location.search); const lk=(qp.get('link')||'').trim();
+    if(lk){
+      history.replaceState(null,'',location.pathname); // don't keep re-linking on reload
+      if(lk!==CLIENT_ID){ setTimeout(()=>{ try{ setPanel.style.display='flex'; }catch(e){} linkDevice(lk); }, 400); }
+    }
+  }catch(e){}
   const copyBtn=document.getElementById('syncCopy');
   if(copyBtn)copyBtn.onclick=async ()=>{ try{ await navigator.clipboard.writeText(CLIENT_ID); syncHint('Copied. Paste it into Aria on your other device.'); }catch(e){ try{codeEl.select();document.execCommand('copy');syncHint('Copied.');}catch(_){ syncHint('Select the code and copy it.'); } } };
   const linkBtn=document.getElementById('syncLinkBtn');
@@ -1024,6 +1054,7 @@ async function linkDevice(code){
   code=(code||'').trim();
   if(!code){ syncHint('Paste a code first.'); return; }
   if(code===CLIENT_ID){ syncHint('That’s already this device’s code.'); return; }
+  if(!/^[A-Za-z0-9-]{8,80}$/.test(code)){ syncHint('That doesn’t look like one of Aria’s codes.'); return; }
   syncHint('Checking that code…');
   let found=null;
   try{ const r=await fetch(LOAD_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({clientId:code})}); const d=await r.json(); found=(d&&d.save&&typeof d.save==='object')?d.save:null; }catch(e){}
@@ -1155,6 +1186,8 @@ document.getElementById('openLibrary').onclick=()=>{ setPanel.style.display='non
 document.getElementById('jvClose').onclick=()=>{ jv.style.display='none'; };
 
 /* boot */
+// only offer the link-up on a device that has no Aria yet
+try{ if(!localStorage.getItem(KEY)){ const bl=document.getElementById('bootLink'); if(bl){ bl.style.display='block'; bl.onclick=()=>{ document.getElementById('boot').classList.add('gone'); setPanel.style.display='flex'; try{ document.getElementById('syncLink').focus(); }catch(e){} }; } } }catch(e){}
 document.getElementById('bootGo').onclick=async ()=>{
   document.getElementById('boot').classList.add('gone');
   ensureCtx(); setEnv(ROOMS[roomIdx].key);
