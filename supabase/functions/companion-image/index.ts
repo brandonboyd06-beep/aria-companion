@@ -93,7 +93,17 @@ Deno.serve(async (req: Request) => {
       const ext = got.ct.includes("png") ? "png" : "jpg";
       const path = `${Date.now()}-${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await sb.storage.from("aria-photos").upload(path, got.bytes, { contentType: got.ct, upsert: false });
-      if (!upErr) { const { data: pub } = sb.storage.from("aria-photos").getPublicUrl(path); if (pub?.publicUrl) return out({ image: pub.publicUrl, provider: used, model }); }
+      if (!upErr) {
+        const { data: pub } = sb.storage.from("aria-photos").getPublicUrl(path);
+        if (pub?.publicUrl) {
+          // her library: remember what she sent, to whom, and why (best effort)
+          const clientId = (b.clientId || "").toString().slice(0, 80);
+          if (clientId) {
+            try { await sb.from("aria_media").insert({ client_id: clientId, kind: "photo", url: pub.publicUrl, prompt: (b.prompt || "").toString().slice(0, 600), alt: b.alt ? String(b.alt).slice(0, 80) : null, source: b.source ? String(b.source).slice(0, 30) : "chat", model, meta: { provider: used } }); } catch { /* library is best effort */ }
+          }
+          return out({ image: pub.publicUrl, provider: used, model });
+        }
+      }
     } catch { /* fall through */ }
   }
   // last resort: hand back whatever URL we have

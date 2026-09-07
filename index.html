@@ -57,7 +57,18 @@
   #conv.show{display:flex}
   #convTop{position:relative;z-index:2;padding:max(16px,env(safe-area-inset-top)) 16px 0;display:flex;justify-content:space-between;align-items:center;}
   #convName{font-family:'Newsreader',serif;font-weight:300;letter-spacing:.4em;text-indent:.4em;font-size:22px;color:#f7f0e6;text-shadow:0 2px 16px #000;}
-  #convClose{pointer-events:auto;background:rgba(20,16,18,.5);border:1px solid rgba(232,184,138,.3);color:#e8c6a3;width:34px;height:34px;border-radius:50%;font-size:16px;cursor:pointer}
+  #convClose,#convLib{pointer-events:auto;background:rgba(20,16,18,.5);border:1px solid rgba(232,184,138,.3);color:#e8c6a3;width:34px;height:34px;border-radius:50%;font-size:16px;cursor:pointer}
+  #convLib{font-size:15px}
+  #libView{position:fixed;inset:0;z-index:46;display:none;flex-direction:column;background:rgba(8,6,7,.96);backdrop-filter:blur(10px)}
+  #libTabs button{background:transparent;border:1px solid rgba(255,255,255,.1);color:#9a8e7e;font-family:inherit;font-size:12px;letter-spacing:.12em;text-transform:uppercase;padding:7px 14px;border-radius:999px;cursor:pointer}
+  #libTabs button.on{border-color:rgba(232,184,138,.6);color:#e8c6a3;background:rgba(232,184,138,.1)}
+  #libGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px;padding:8px 12px 40px}
+  .libCell{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#1a1512;border:1px solid rgba(232,184,138,.14);cursor:pointer}
+  .libCell img,.libCell video{width:100%;height:100%;object-fit:cover;display:block}
+  .libCell .badge{position:absolute;right:6px;bottom:6px;font-size:11px;padding:2px 7px;border-radius:999px;background:rgba(0,0,0,.55);color:#f0e2d0}
+  #libDetail{position:fixed;inset:0;z-index:47;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(6,4,5,.96);padding:14px}
+  #libDetail img,#libDetail video{max-width:96vw;max-height:70vh;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.6)}
+  .libAct{padding:9px 14px;border-radius:12px;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.7);color:#e8c6a3;font-family:Inter,sans-serif;font-size:13px;cursor:pointer}
   #convChat{position:relative;z-index:2;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;padding:18vh 7vw 14px;display:flex;flex-direction:column;gap:14px;mask-image:linear-gradient(180deg,transparent,#000 18%);}
   #convChat>:first-child{margin-top:auto;}
   #convChat::-webkit-scrollbar{width:0}
@@ -115,7 +126,7 @@
 
 <!-- conversation -->
 <div id="conv">
-  <div id="convTop"><div id="convName">ARIA</div><button id="convClose">✕</button></div>
+  <div id="convTop"><div id="convName">ARIA</div><div style="display:flex;gap:8px;align-items:center"><button id="convLib" title="Her photos &amp; videos">🖼</button><button id="convClose">✕</button></div></div>
   <div id="convChat"></div>
   <div id="convBar"><form id="convForm">
     <button id="convCam" type="button" title="Ask Aria for a photo">📷</button>
@@ -146,6 +157,7 @@
       <div style="display:flex;gap:6px"><input id="syncLink" placeholder="Paste Aria's code" style="flex:1;min-width:0;background:rgba(28,24,21,.85);border:1px solid rgba(232,184,138,.25);color:#f4ece1;font-size:12px;padding:9px;border-radius:8px;user-select:text;-webkit-user-select:text"><button id="syncLinkBtn" style="flex:none;padding:0 14px;border-radius:8px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:12px;cursor:pointer">Link</button></div>
       <div id="syncHint" style="font-size:11px;line-height:1.5;color:#9a8e7e;margin-top:8px;text-align:center;display:none"></div>
     </div>
+    <button id="openLibrary" style="margin-top:16px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">🖼&nbsp; Her photos &amp; videos</button>
     <button id="openJournal" style="margin-top:16px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(232,184,138,.4);background:rgba(232,184,138,.06);color:#e8c6a3;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">📔 Her journal</button>
     <button id="setReset" style="margin-top:10px;width:100%;padding:11px;border-radius:12px;border:1px solid rgba(220,120,120,.4);background:transparent;color:#e69b9b;font-family:inherit;font-size:13px;letter-spacing:.1em;cursor:pointer">Reset relationship</button>
     <button id="forceUpdate" style="margin-top:10px;width:100%;padding:9px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#9a8e7e;font-family:inherit;font-size:12px;letter-spacing:.1em;cursor:pointer">↻ Force update</button>
@@ -170,7 +182,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.23"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.24"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -500,7 +512,7 @@ document.body.appendChild(_lb);
 _lb.onclick=()=>{ _lb.style.display='none'; document.getElementById('lightboxImg').src=''; };
 function openLightbox(src){ document.getElementById('lightboxImg').src=src; _lb.style.display='flex'; }
 // she sends a picture: render a developing placeholder, generate, then reveal it
-async function sendPhoto(prompt,alt){
+async function sendPhoto(prompt,alt,source){
   if(!prompt)return;
   const d=document.createElement('div');d.className='msg photo loading';d.innerHTML='<div class="ph">developing…</div>';
   convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;
@@ -508,7 +520,7 @@ async function sendPhoto(prompt,alt){
   let info='';
   try{
     console.log('[aria photo] requesting',prompt.slice(0,40));
-    const r=await fetch(IMG_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({prompt})});
+    const r=await fetch(IMG_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({prompt, alt:alt||'', source:source||'chat', clientId:CLIENT_ID})});
     info='http '+r.status;
     let j=null; try{ j=await r.json(); }catch(pe){ info+=' / json-parse-fail'; }
     console.log('[aria photo] response',info,j);
@@ -518,7 +530,7 @@ async function sendPhoto(prompt,alt){
       const im=document.createElement('img');im.alt=alt||'';
       im.style.cssText='display:block;width:240px;max-width:78vw;height:auto;border-radius:14px;border:1px solid rgba(232,184,138,.35);cursor:zoom-in';
       im.onclick=()=>openLightbox(j.image);
-      im.onload=()=>{console.log('[aria photo] loaded',im.naturalWidth+'x'+im.naturalHeight);convChat.scrollTop=convChat.scrollHeight;};
+      im.onload=()=>{console.log('[aria photo] loaded',im.naturalWidth+'x'+im.naturalHeight);convChat.scrollTop=convChat.scrollHeight;libDirty=true;};
       im.onerror=()=>{ dbg('the photo didn’t come through — tap 📷 to try again'); console.log('[aria photo] IMG ERROR',info,j.image); };
       im.src=j.image;
       d.appendChild(im);
@@ -626,8 +638,8 @@ async function requestSelfie(){
     const reply=(res&&res.reply)?res.reply.trim():'here, baby';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();
     if(res&&res.scene)applyChatScene(res.scene);
-    if(res&&res.image&&res.image.prompt) sendPhoto(res.image.prompt,res.image.alt);
-    else sendPhoto('a warm candid selfie of Aria smiling at the camera in her cozy home right now',''); // guarantee a photo
+    if(res&&res.image&&res.image.prompt) sendPhoto(res.image.prompt,res.image.alt,'selfie');
+    else sendPhoto('a warm candid selfie of Aria smiling at the camera in her cozy home right now','','selfie'); // guarantee a photo
     awayFor=null; markSeen();
   }catch(e){hideTyping();}
   finally{busy=false;convInput.focus();}
@@ -686,7 +698,7 @@ async function requestVideo(desc, seedUrl){
     if(!start||!start.id){ d.textContent='*the video wouldn’t start*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
     // show the still as a preview while it renders
     if(start.still){ d.innerHTML=''; d.style.cssText='align-self:flex-start;max-width:82%;position:relative'; const pv=document.createElement('img'); pv.src=start.still; pv.style.cssText='display:block;width:240px;max-width:78vw;height:auto;border-radius:14px;filter:brightness(.6)'; d.appendChild(pv); const lb=document.createElement('div'); lb.textContent='🎬 filming…'; lb.style.cssText='position:absolute;bottom:8px;left:10px;color:#fff;font-family:Newsreader,serif;font-style:italic;font-size:13px;text-shadow:0 1px 6px #000'; d.appendChild(lb); }
-    pollVideoInto(d, start.id, vbtn);
+    pollVideoInto(d, start.id, vbtn, {prompt:desc||motionPrompt, source: seedUrl?'make_it_move':'video'});
   }catch(e){ d.textContent='*the video didn’t send*'; videoBusy=false; if(vbtn)vbtn.disabled=false; }
 }
 // render a finished clip + an Extend button into bubble d
@@ -701,12 +713,12 @@ function renderVideoInto(d, videoUrl){
   d.appendChild(ex);
   convChat.scrollTop=convChat.scrollHeight;
 }
-function pollVideoInto(d, id, vbtn){
-  let tries=0;
+function pollVideoInto(d, id, vbtn, meta){
+  let tries=0; meta=meta||{};
   const tick=async ()=>{
     tries++;
-    let p=null; try{ p=await callFn(VID_URL,{action:'poll',id}); }catch(e){}
-    if(p&&p.status==='done'&&p.video){ renderVideoInto(d,p.video); videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
+    let p=null; try{ p=await callFn(VID_URL,{action:'poll',id, prompt:meta.prompt||'', source:meta.source||'video'}); }catch(e){}
+    if(p&&p.status==='done'&&p.video){ renderVideoInto(d,p.video); libDirty=true; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
     if(p&&p.status==='failed'){ d.textContent='*the video didn’t come through*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
     if(tries>60){ d.textContent='*the video is taking too long — try again later*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
     setTimeout(tick,4000);
@@ -724,7 +736,7 @@ async function extendVideo(videoUrl, desc){
   try{
     const start=await callFn(VID_URL,{action:'extend', video:videoUrl, prompt: desc||'continue the scene naturally, smooth seamless motion'});
     if(!start||!start.id){ d.textContent='*couldn’t extend that clip*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
-    pollVideoInto(d, start.id, vbtn);
+    pollVideoInto(d, start.id, vbtn, {prompt:desc||'', source:'extend'});
   }catch(e){ d.textContent='*the extend didn’t send*'; videoBusy=false; if(vbtn)vbtn.disabled=false; }
 }
 document.getElementById('convVid').onclick=openVidPrompt;
@@ -825,8 +837,10 @@ convInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.prev
 
 /* ───────── settings, ambient sound, voice ───────── */
 const SKEY="aria.settings.v1";
-let settings={voice:true,sound:true,voiceId:'English_Soft-spokenGirl',voiceSpeed:0.92};
+let settings={voice:true,sound:true,voiceId:'jessica',voiceSpeed:1.0,voiceStyle:0.6};
 try{const j=JSON.parse(localStorage.getItem(SKEY));if(j)settings=Object.assign(settings,j);}catch(e){}
+// migrate from the old MiniMax ids (they were never actually used — the server ran ElevenLabs' default)
+if(!/^[a-z]+$/.test(String(settings.voiceId||''))){ settings.voiceId='jessica'; settings.voiceSpeed=1.0; settings.voiceStyle=0.6; }
 function saveSettings(){try{localStorage.setItem(SKEY,JSON.stringify(settings));}catch(e){}}
 
 const VOICE_URL=SUPA+"/functions/v1/companion-voice";
@@ -881,7 +895,7 @@ function browserSpeak(clean){if(!('speechSynthesis'in window)){window._onVoiceEn
 function cleanForVoice(t){return String(t).replace(/\*[^*]*\*/g,' ').replace(/[_*#>`~]/g,'').replace(/\s+/g,' ').trim();}
 function stopVoice(){try{if(voiceSrc){voiceSrc.stop();voiceSrc=null;}}catch(e){}try{if('speechSynthesis'in window)speechSynthesis.cancel();}catch(e){}}
 async function synthAndPlay(text){
-  const r=await fetch(VOICE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({text, rpVoice:settings.voiceId, speed:settings.voiceSpeed})});
+  const r=await fetch(VOICE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({text, elVoice:currentVoice().el, style:(typeof settings.voiceStyle==='number'?settings.voiceStyle:currentVoice().st), stability:0.35, speed:settings.voiceSpeed||1.0, rpVoice:'English_Soft-spokenGirl'})});
   const d=await r.json();
   if(d&&d.audio){
     ensureCtx();
@@ -994,15 +1008,18 @@ async function linkDevice(code){
 }
 
 /* ── voice picker: audition & choose how she sounds ── */
+// ElevenLabs voices (the app runs on ElevenLabs; el = voice id, st = style, sp = speed)
 const VOICES=[
-  {id:'English_Soft-spokenGirl', sp:0.92, label:'Soft &amp; close'},
-  {id:'English_Whispering_girl', sp:0.92, label:'Breathy whisper'},
-  {id:'English_SereneWoman',     sp:0.94, label:'Smooth &amp; serene'},
-  {id:'English_ConfidentWoman',  sp:0.95, label:'Low &amp; confident'},
-  {id:'English_Graceful_Lady',   sp:0.95, label:'Graceful'},
-  {id:'English_LovelyGirl',      sp:1.0,  label:'Warm &amp; sweet'},
-  {id:'Calm_Woman',              sp:1.0,  label:'Calm (original)'},
+  {id:'jessica',  el:'cgSgspJ2msm6clMCkdW9', st:0.6,  sp:1.0,  label:'Jessica · playful &amp; flirty'},
+  {id:'charlotte',el:'XB0fDUnXU5powFXDhCwa', st:0.55, sp:0.97, label:'Charlotte · seductive'},
+  {id:'laura',    el:'FGY2WhTYpPnrIDTdsKH5', st:0.6,  sp:1.0,  label:'Laura · upbeat &amp; cheeky'},
+  {id:'freya',    el:'jsCqWAovK2LkecY7zXl4', st:0.55, sp:1.0,  label:'Freya · bold &amp; expressive'},
+  {id:'nicole',   el:'piTKgcLEGmPE4e6mEKli', st:0.45, sp:0.95, label:'Nicole · breathy whisper'},
+  {id:'lily',     el:'pFZP5JQG7iQjIQuC4Bku', st:0.5,  sp:0.97, label:'Lily · velvety, British'},
+  {id:'matilda',  el:'XrExE9yKIg1WjnnlVkGX', st:0.5,  sp:1.0,  label:'Matilda · warm &amp; sweet'},
+  {id:'sarah',    el:'EXAVITQu4vr4xnSDxMaL', st:0.4,  sp:1.0,  label:'Sarah · the original'},
 ];
+function currentVoice(){ return VOICES.find(v=>v.id===settings.voiceId)||VOICES[0]; }
 const VOICE_SAMPLES=["Mm… there you are. I was hoping you'd come find me.","Come here. I've missed the sound of your voice.","Stay a while. I like it when it's just us."];
 let sampleIdx=0;
 function renderVoices(){
@@ -1012,7 +1029,7 @@ function renderVoices(){
     const b=document.createElement('button');
     b.style.cssText='display:block;width:100%;text-align:left;margin:4px 0;padding:9px 12px;border-radius:10px;border:1px solid '+(sel?'rgba(232,184,138,.6)':'rgba(255,255,255,.08)')+';background:'+(sel?'rgba(232,184,138,.12)':'transparent')+';color:#e7dccb;font-family:inherit;font-size:13px;cursor:pointer';
     b.innerHTML='<span style="opacity:.55;margin-right:9px">▶</span>'+v.label+(sel?'<span style="float:right;color:#e8c6a3">✓</span>':'');
-    b.onclick=()=>{ settings.voiceId=v.id; settings.voiceSpeed=v.sp; saveSettings(); renderVoices();
+    b.onclick=()=>{ settings.voiceId=v.id; settings.voiceSpeed=v.sp; settings.voiceStyle=v.st; saveSettings(); renderVoices();
       const line=VOICE_SAMPLES[sampleIdx++ % VOICE_SAMPLES.length];
       synthAndPlay(line).catch(()=>{}); };
     box.appendChild(b);
@@ -1041,6 +1058,66 @@ function openJournal(){
 }
 function esc(t){return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 document.getElementById('openJournal').onclick=()=>{ setPanel.style.display='none'; openJournal(); };
+
+/* ── her photos & videos: everything she has ever sent, kept ── */
+const MEDIA_URL=SUPA+"/functions/v1/companion-media";
+const lv=document.createElement('div'); lv.id='libView';
+lv.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:max(18px,env(safe-area-inset-top)) 20px 8px"><div style="font-family:Newsreader,serif;letter-spacing:.24em;text-indent:.24em;font-size:19px;color:#f4ece1">HER PHOTOS</div><div id="lvClose" style="font-size:13px;letter-spacing:.2em;color:#9a8e7e;text-transform:uppercase;cursor:pointer">Close</div></div>'
+ +'<div id="libTabs" style="display:flex;gap:8px;padding:4px 16px 8px"><button data-k="all" class="on">All</button><button data-k="photo">Photos</button><button data-k="video">Videos</button><span id="libCount" style="margin-left:auto;font-size:12px;color:#6f665b;align-self:center"></span></div>'
+ +'<div id="libScroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"><div id="libGrid"></div><div id="libEmpty" style="display:none;text-align:center;color:#9a8e7e;font-family:Newsreader,serif;font-style:italic;font-size:15px;padding:40px 20px">nothing here yet — ask her for a picture</div></div>';
+document.body.appendChild(lv);
+const ld=document.createElement('div'); ld.id='libDetail';
+ld.innerHTML='<div id="ldMedia" style="display:flex;align-items:center;justify-content:center;max-width:100%"></div>'
+ +'<div id="ldCap" style="margin-top:10px;max-width:92vw;text-align:center;font-family:Newsreader,serif;font-style:italic;font-size:14px;color:#cdb89a;line-height:1.45"></div>'
+ +'<div id="ldDate" style="margin-top:4px;font-size:11px;letter-spacing:.14em;color:#6f665b;text-transform:uppercase"></div>'
+ +'<div id="ldActs" style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;justify-content:center"></div>'
+ +'<div id="ldClose" style="margin-top:16px;font-size:12px;letter-spacing:.2em;color:#8a7f73;text-transform:uppercase;cursor:pointer">Close</div>';
+document.body.appendChild(ld);
+let libItems=[], libKind='all', libLoaded=false;
+function libFmtDate(d){ try{ return new Date(d).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})+' · '+new Date(d).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }catch(e){ return ''; } }
+function renderLib(){
+  const grid=document.getElementById('libGrid'); grid.innerHTML='';
+  const items=libItems.filter(it=>libKind==='all'||it.kind===libKind);
+  document.getElementById('libEmpty').style.display=items.length?'none':'block';
+  document.getElementById('libCount').textContent=items.length?(items.length+(items.length===1?' item':' items')):'';
+  for(const it of items){
+    const c=document.createElement('div'); c.className='libCell';
+    if(it.kind==='video'){ const v=document.createElement('video'); v.src=it.url+'#t=0.5'; v.muted=true; v.playsInline=true; v.setAttribute('playsinline',''); v.preload='metadata'; c.appendChild(v); const b=document.createElement('span'); b.className='badge'; b.textContent='▶'; c.appendChild(b); }
+    else { const im=document.createElement('img'); im.loading='lazy'; im.decoding='async'; im.src=it.url; im.alt=it.alt||''; c.appendChild(im); }
+    c.onclick=()=>openLibDetail(it);
+    grid.appendChild(c);
+  }
+}
+async function loadLib(force){
+  if(libLoaded&&!force){ renderLib(); return; }
+  document.getElementById('libCount').textContent='loading…';
+  try{ const r=await callFn(MEDIA_URL,{action:'list',limit:300}); libItems=(r&&Array.isArray(r.items))?r.items:[]; libLoaded=true; }catch(e){ libItems=libItems||[]; }
+  renderLib();
+}
+let libDirty=false;
+function openLibrary(){ lv.style.display='flex'; loadLib(!libLoaded||libDirty); libDirty=false; }
+function closeLibrary(){ lv.style.display='none'; }
+function openLibDetail(it){
+  const m=document.getElementById('ldMedia'); m.innerHTML='';
+  if(it.kind==='video'){ const v=document.createElement('video'); v.src=it.url; v.controls=true; v.autoplay=true; v.playsInline=true; v.setAttribute('playsinline',''); m.appendChild(v); }
+  else { const im=document.createElement('img'); im.src=it.url; im.alt=it.alt||''; m.appendChild(im); }
+  document.getElementById('ldCap').textContent=it.alt||(it.prompt?it.prompt.slice(0,140):'');
+  document.getElementById('ldDate').textContent=libFmtDate(it.created_at);
+  const acts=document.getElementById('ldActs'); acts.innerHTML='';
+  const mk=(label,fn)=>{ const b=document.createElement('button'); b.className='libAct'; b.textContent=label; b.onclick=fn; acts.appendChild(b); return b; };
+  if(it.kind==='photo') mk('🎬 Make it move',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openVidPrompt(it.url); });
+  else mk('➕ Extend',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openExtendPrompt(it.url); });
+  mk('↗ Open',()=>{ try{ window.open(it.url,'_blank'); }catch(e){} });
+  const del=mk('🗑 Delete',async ()=>{ if(!confirm('Remove this from her library? (the file itself stays)'))return; del.disabled=true; try{ const r=await callFn(MEDIA_URL,{action:'delete',id:it.id}); if(r&&r.ok){ libItems=libItems.filter(x=>x.id!==it.id); renderLib(); closeLibDetail(); } }catch(e){} del.disabled=false; });
+  ld.style.display='flex';
+}
+function closeLibDetail(){ const v=ld.querySelector('video'); if(v){ try{v.pause();}catch(e){} } ld.style.display='none'; }
+document.getElementById('ldClose').onclick=closeLibDetail;
+ld.onclick=(e)=>{ if(e.target===ld)closeLibDetail(); };
+document.getElementById('lvClose').onclick=closeLibrary;
+document.getElementById('libTabs').onclick=(e)=>{ const b=e.target.closest('button'); if(!b)return; libKind=b.dataset.k; for(const x of document.querySelectorAll('#libTabs button'))x.classList.toggle('on',x===b); renderLib(); };
+document.getElementById('convLib').onclick=openLibrary;
+document.getElementById('openLibrary').onclick=()=>{ setPanel.style.display='none'; openLibrary(); };
 document.getElementById('jvClose').onclick=()=>{ jv.style.display='none'; };
 
 /* boot */

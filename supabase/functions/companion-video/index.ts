@@ -46,6 +46,15 @@ Deno.serve(async (req: Request) => {
             }
           } catch { /* keep original url */ }
         }
+        // her library (best effort): the client passes clientId on every poll
+        const clientId = (b.clientId || "").toString().slice(0, 80);
+        if (video && clientId) {
+          try {
+            const sb = createClient(SUPA, SRK);
+            const { data: dup } = await sb.from("aria_media").select("id").eq("client_id", clientId).eq("url", video).maybeSingle();
+            if (!dup) await sb.from("aria_media").insert({ client_id: clientId, kind: "video", url: video, prompt: b.prompt ? String(b.prompt).slice(0, 600) : null, alt: b.alt ? String(b.alt).slice(0, 80) : null, source: b.source ? String(b.source).slice(0, 30) : "video", model: b.model ? String(b.model).slice(0, 80) : null, meta: { job: id } });
+          } catch { /* best effort */ }
+        }
         return out({ status: "done", video });
       }
       if (st === "failed") return out({ status: "failed", error: (j?.data?.error || "generation failed") });
