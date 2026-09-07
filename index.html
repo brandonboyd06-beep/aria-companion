@@ -206,7 +206,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.32"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.33"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -1084,8 +1084,11 @@ async function linkDevice(code){
   if(!found){ syncHint('No Aria found for that code. Double-check it and try again.'); return; }
   const who=found.playerName?(' (she knows you as '+found.playerName+')'):'';
   if(!confirm('Link this device to that Aria'+who+'? This device’s current copy will be replaced by the linked one.')){ syncHint(''); return; }
+  const prevId=CLIENT_ID;
   CLIENT_ID=code;
   try{ localStorage.setItem("aria.account_id",code); localStorage.removeItem(KEY); }catch(e){}
+  // bring this device's photos & videos along to the linked account (best effort, idempotent)
+  try{ if(prevId&&prevId!==code){ await fetch(MEDIA_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({action:'adopt', clientId:code, fromClientId:prevId})}); } }catch(e){}
   // move this device's push subscription onto the linked account so she can still reach this phone
   try{
     if('serviceWorker' in navigator){ const reg=swReg||await navigator.serviceWorker.ready; const sub=await reg.pushManager.getSubscription();

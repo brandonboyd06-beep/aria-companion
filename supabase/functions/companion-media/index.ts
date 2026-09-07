@@ -5,6 +5,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 //   { action:"list",   clientId, kind?: "photo"|"video", limit?, before? }  -> { items }
 //   { action:"add",    clientId, kind, url, prompt?, alt?, source?, model?, meta? } -> { item }  (client-side fallback logger)
 //   { action:"delete", clientId, id } -> { ok }
+//   { action:"adopt",  clientId, fromClientId } -> { ok, moved }  (a linked device brings its library along)
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -42,6 +43,23 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await sb.from("aria_media").insert(row).select("id, kind, url, prompt, alt, source, model, meta, created_at").maybeSingle();
       if (error) return out({ error: "db", detail: error.message }, 500);
       return out({ item: data });
+    }
+    if (action === "adopt") {
+      // a device just linked to another account: bring its old library rows along (idempotent)
+      const from = (b.fromClientId || "").toString().slice(0, 80);
+      if (!from || from === clientId) return out({ error: "bad_from" }, 400);
+      const { data: rows, error } = await sb.from("aria_media").select("kind, url, prompt, alt, source, model, meta, created_at").eq("client_id", from).order("created_at", { ascending: true }).limit(1000);
+      if (error) return out({ error: "db", detail: error.message }, 500);
+      let moved = 0;
+      for (const r of rows || []) {
+        try {
+          const { data: dup } = await sb.from("aria_media").select("id").eq("client_id", clientId).eq("url", r.url).maybeSingle();
+          if (dup) continue;
+          const { error: insErr } = await sb.from("aria_media").insert({ client_id: clientId, kind: r.kind, url: r.url, prompt: r.prompt, alt: r.alt, source: r.source, model: r.model, meta: { ...(r.meta || {}), adopted_from: from }, created_at: r.created_at });
+          if (!insErr) moved++;
+        } catch { /* best effort */ }
+      }
+      return out({ ok: true, moved, seen: (rows || []).length });
     }
     if (action === "delete") {
       const id = (b.id || "").toString();
