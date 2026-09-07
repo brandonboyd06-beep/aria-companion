@@ -81,9 +81,9 @@
   .stGo:disabled{opacity:.5;cursor:default}
   #stBaseBox{display:flex;gap:10px;align-items:center;margin:6px 0}
   #stBaseBox img{width:72px;height:96px;object-fit:cover;border-radius:10px;border:1px solid rgba(232,184,138,.3);background:#1a1512}
-  #stPick{display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px;-webkit-overflow-scrolling:touch}
-  #stPick img{width:54px;height:72px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,.08);flex:0 0 auto;cursor:pointer}
-  #stPick img.on{border-color:rgba(232,184,138,.9)}
+  #stPick,#stVPick{display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px;-webkit-overflow-scrolling:touch}
+  #stPick img,#stVPick img{width:54px;height:72px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,.08);flex:0 0 auto;cursor:pointer}
+  #stPick img.on,#stVPick img.on{border-color:rgba(232,184,138,.9)}
   #stResults{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;padding:8px 14px 40px}
   .stCard{background:#14100e;border:1px solid rgba(232,184,138,.14);border-radius:12px;overflow:hidden}
   .stCard img,.stCard video{width:100%;display:block;aspect-ratio:3/4;object-fit:cover;background:#1a1512}
@@ -206,7 +206,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.30"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.31"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
