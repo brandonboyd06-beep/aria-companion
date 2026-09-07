@@ -182,7 +182,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.24"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.25"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -895,7 +895,7 @@ function browserSpeak(clean){if(!('speechSynthesis'in window)){window._onVoiceEn
 function cleanForVoice(t){return String(t).replace(/\*[^*]*\*/g,' ').replace(/[_*#>`~]/g,'').replace(/\s+/g,' ').trim();}
 function stopVoice(){try{if(voiceSrc){voiceSrc.stop();voiceSrc=null;}}catch(e){}try{if('speechSynthesis'in window)speechSynthesis.cancel();}catch(e){}}
 async function synthAndPlay(text){
-  const r=await fetch(VOICE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({text, elVoice:currentVoice().el, style:(typeof settings.voiceStyle==='number'?settings.voiceStyle:currentVoice().st), stability:0.35, speed:settings.voiceSpeed||1.0, rpVoice:'English_Soft-spokenGirl'})});
+  const r=await fetch(VOICE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({text, elVoice:currentVoice().el, model:(window._callMode?'eleven_turbo_v2_5':'eleven_multilingual_v2'), style:(typeof settings.voiceStyle==='number'?settings.voiceStyle:currentVoice().st), stability:0.35, speed:settings.voiceSpeed||1.0, rpVoice:'English_Soft-spokenGirl'})});
   const d=await r.json();
   if(d&&d.audio){
     ensureCtx();
