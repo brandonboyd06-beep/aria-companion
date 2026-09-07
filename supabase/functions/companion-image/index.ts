@@ -50,6 +50,7 @@ async function genAtlas(model: string, prompt: string): Promise<string | null> {
 // editor that made every edit including the topless one, kept her identity, and ran in 9-15 s (~$0.02);
 // the Pro editor was close but partial on the topless edit and slower; Kontext/Seedream sanitized it.
 const DEFAULT_EDIT_MODEL = "qwen/qwen-image-2.0/edit";
+const EDIT_FALLBACK = "alibaba/wan-2.7/image-edit";
 // payload shape per model family (AtlasCloud rejects unknown fields on some models)
 function editPayloads(model: string, prompt: string, url: string): any[] {
   if (/flux-kontext/i.test(model)) return [{ model, prompt, image: url, enable_safety_checker: false, guidance_scale: 2.5 }, { model, prompt, image: url }];
@@ -140,13 +141,19 @@ Deno.serve(async (req: Request) => {
   if ((b.action || "") === "edit") {
     const imageUrl = (typeof b.imageUrl === "string" && /^https?:\/\//.test(b.imageUrl)) ? b.imageUrl : "";
     if (!imageUrl) return out({ error: "no_image" }, 400);
-    let emodel = DEFAULT_EDIT_MODEL;
-    try { const { data } = await sb.from("companion_config").select("value").eq("key", "image_edit").maybeSingle(); if (data?.value?.model) emodel = String(data.value.model); } catch { /* default */ }
+    let emodel = DEFAULT_EDIT_MODEL, efallback = EDIT_FALLBACK;
+    try { const { data } = await sb.from("companion_config").select("value").eq("key", "image_edit").maybeSingle(); if (data?.value?.model) emodel = String(data.value.model); if (data?.value?.alt) efallback = String(data.value.alt); } catch { /* default */ }
     if (b.model) emodel = String(b.model);
     const instruction = `Edit this photo of Aria: ${prompt}. Keep her the same person (same face, hair, skin tone and body) and keep everything not mentioned unchanged. Photorealistic, natural lighting, like a real photograph.`;
-    const res = await genAtlasEdit(emodel, instruction, imageUrl);
+    let res = await genAtlasEdit(emodel, instruction, imageUrl);
+    let usedEditor = emodel;
+    if (!res.image && !b.model && efallback && efallback !== emodel) {
+      // the judges' runner-up (Wan 2.7, also uncensored and identity-safe) when the primary editor fails
+      const res2 = await genAtlasEdit(efallback, instruction, imageUrl);
+      if (res2.image) { res = res2; usedEditor = efallback; }
+    }
     if (!res.image) return out({ error: "edit_failed", model: emodel, detail: res.detail || "" }, 502);
-    return await deliver(res.image, { model: emodel, provider: "atlascloud", source: b.source ? String(b.source).slice(0, 30) : "edit", extra: { from: imageUrl, instruction: prompt.slice(0, 300) } });
+    return await deliver(res.image, { model: usedEditor, provider: "atlascloud", source: b.source ? String(b.source).slice(0, 30) : "edit", extra: { from: imageUrl, instruction: prompt.slice(0, 300) } });
   }
 
   prompt = `${prompt}. If a woman appears, she is always the same person: ${ariaLook(prompt)}. ${ARIA_STYLE}`;
