@@ -206,7 +206,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.31"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.32"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -1271,11 +1271,12 @@ function stRenderPick(){
   const urls=[...new Set(mine.concat(lib))].slice(0,40);
   for(const id of ['stPick','stVPick']){ const box=document.getElementById(id); box.innerHTML=''; for(const u of urls){ const im=document.createElement('img'); im.src=u; im.loading='lazy'; if(u===stu.base)im.classList.add('on'); im.onclick=()=>stSetBase(u); box.appendChild(im); } }
 }
+function stBusy(on){ stu.busy=!!on; for(const id of ['stGen','stEditGo','stVidGo']){ const b=document.getElementById(id); if(b)b.disabled=!!on; } }
 function stCard(kind, meta){
   const c=document.createElement('div'); c.className='stCard busy'; c.innerHTML='<div class="ph">'+(kind==='video'?'filming…':'developing…')+'</div><div class="cap">'+(meta.caption||'').replace(/[<>&]/g,'')+'</div>';
   const grid=document.getElementById('stResults'); grid.insertBefore(c, grid.firstChild); return c;
 }
-function stFillCard(c, kind, url, meta){
+function stFillCard(c, kind, url, meta, quiet){
   c.className='stCard'; c.innerHTML='';
   if(kind==='video'){ const v=document.createElement('video'); v.src=url; v.controls=true; v.playsInline=true; v.setAttribute('playsinline',''); v.preload='metadata'; c.appendChild(v); }
   else { const im=document.createElement('img'); im.src=url; im.loading='lazy'; im.onclick=()=>openLightbox(url); c.appendChild(im); }
@@ -1285,16 +1286,17 @@ function stFillCard(c, kind, url, meta){
   if(kind==='photo'){ mk('✏️ Edit',()=>{ stSetBase(url); stTab('edit'); document.getElementById('stScroll').scrollTop=0; }); mk('🎬 Video',()=>{ stSetBase(url); stTab('video'); document.getElementById('stScroll').scrollTop=0; }); }
   else { mk('➕ Extend',()=>stExtend(url)); }
   mk('↗ Open',()=>{ try{ window.open(url,'_blank'); }catch(e){} });
-  if(meta.prompt) mk('⧉ Prompt',()=>{ try{ navigator.clipboard.writeText(meta.prompt); stStatus('prompt copied'); }catch(e){} });
+  if(meta.prompt) mk('⧉ Prompt',async ()=>{ try{ await navigator.clipboard.writeText(meta.prompt); stStatus('prompt copied'); }catch(e){ stStatus('couldn’t copy'); } });
   c.appendChild(acts);
-  stu.results.unshift({kind,url,prompt:meta.prompt||'',model:meta.model||''}); libDirty=true; stRenderPick();
+  stu.results.unshift({kind,url,prompt:meta.prompt||'',model:meta.model||''});
+  if(!quiet){ libDirty=true; stRenderPick(); }
 }
 function stFailCard(c, msg){ c.className='stCard'; c.innerHTML='<div class="ph" style="color:#e69b9b;font-size:12px;padding:10px;text-align:center">'+msg.replace(/[<>&]/g,'')+'</div>'; }
 async function stGenerate(){
   const prompt=document.getElementById('stPrompt').value.trim(); if(!prompt||stu.busy)return;
   const model=document.getElementById('stModel').value, size=document.getElementById('stSize').value, seedV=document.getElementById('stSeed').value, count=Math.max(1,Math.min(4,Number(document.getElementById('stCount').value)||1));
   const neg=document.getElementById('stNeg').value.trim(), look=document.getElementById('stLook').checked;
-  stu.busy=true; document.getElementById('stGen').disabled=true;
+  stBusy(true);
   for(let i=0;i<count;i++){
     const c=stCard('photo',{caption:prompt});
     stStatus('generating '+(i+1)+' of '+count+' on '+model+'…');
@@ -1307,12 +1309,12 @@ async function stGenerate(){
       else stFailCard(c,'no image: '+((j&&(j.error+(j.detail?' · '+j.detail:'')))||('http '+r.status)));
     }catch(e){ stFailCard(c,'request failed'); }
   }
-  stStatus(''); stu.busy=false; document.getElementById('stGen').disabled=false;
+  stStatus(''); stBusy(false);
 }
 async function stEditGo(){
   const instr=document.getElementById('stEditPrompt').value.trim(); if(!instr||!stu.base||stu.busy){ if(!stu.base)stStatus('pick a base image first'); return; }
   const model=document.getElementById('stEditModel').value, keep=document.getElementById('stEditKeep').checked;
-  stu.busy=true; document.getElementById('stEditGo').disabled=true;
+  stBusy(true);
   const c=stCard('photo',{caption:'edit: '+instr}); stStatus('editing on '+model+'…');
   try{
     const r=await fetch(IMG_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({action:'edit', imageUrl:stu.base, prompt:instr, model, raw:!keep, clientId:CLIENT_ID, source:'studio_edit', alt:instr.slice(0,60)})});
@@ -1320,50 +1322,55 @@ async function stEditGo(){
     if(j&&j.image) stFillCard(c,'photo',j.image,{caption:'edit: '+instr,prompt:instr,model:j.model||model});
     else stFailCard(c,'edit failed: '+((j&&(j.error+(j.detail?' · '+String(j.detail).slice(0,120):'')))||('http '+r.status)));
   }catch(e){ stFailCard(c,'request failed'); }
-  stStatus(''); stu.busy=false; document.getElementById('stEditGo').disabled=false;
+  stStatus(''); stBusy(false);
 }
 async function stPoll(c, id, meta){
   for(let tries=0;tries<110;tries++){
     await new Promise(r=>setTimeout(r,4000));
-    let p=null; try{ p=await callFn(VID_URL,{action:'poll',id, prompt:meta.prompt||'', source:meta.source||'studio_video'}); }catch(e){}
+    let p=null; try{ p=await callFn(VID_URL,{action:'poll',id, prompt:meta.prompt||'', source:meta.source||'studio_video', model:meta.model||'', alt:(meta.caption||'').slice(0,60)}); }catch(e){}
     if(p&&p.status==='done'&&p.video){ stFillCard(c,'video',p.video,meta); return true; }
-    if(p&&p.status==='failed'){ stFailCard(c,'video failed'+(p.error?(': '+String(p.error).slice(0,120)):'')); return false; }
+    if(p&&p.status==='done'&&!p.video){ stFailCard(c,'video finished without a file'); libDirty=true; return false; }
+    if(p&&p.status==='failed'){ stFailCard(c,'video failed'+(p.error?(': '+String(p.error).slice(0,120)):'')); libDirty=true; return false; }
     stStatus('rendering… '+Math.round(tries*4/60*10)/10+' min');
   }
-  stFailCard(c,'video is taking too long — check the library later'); return false;
+  stFailCard(c,'video is taking too long — check the library later'); libDirty=true; return false;
 }
 async function stVideoGo(){
   const motion=document.getElementById('stMotion').value.trim(); const still=document.getElementById('stStill').value.trim();
   if(!motion||stu.busy)return; if(!stu.base&&!still){ stStatus('set a start frame or describe a still to generate first'); return; }
   const model=document.getElementById('stVidModel').value, duration=Number(document.getElementById('stDur').value)||5, resolution=document.getElementById('stRes').value, raw=document.getElementById('stVRaw').checked;
-  stu.busy=true; document.getElementById('stVidGo').disabled=true;
+  stBusy(true);
   const c=stCard('video',{caption:motion}); stStatus('starting on '+model+'…');
   try{
     const body={action:'start', prompt:motion, model, duration, resolution, raw, source:'studio_video'};
-    if(stu.base)body.imageUrl=stu.base; else { body.stillPrompt=still; body.stillModel=document.getElementById('stModel').value; }
+    if(stu.base)body.imageUrl=stu.base; else { body.stillPrompt=still; body.stillModel=document.getElementById('stModel').value; body.stillRaw=!document.getElementById('stLook').checked; }
     const start=await callFn(VID_URL, body);
-    if(start&&start.id){ if(start.still&&!stu.base){ stu.results.unshift({kind:'photo',url:start.still,prompt:still,model:''}); } await stPoll(c, start.id, {caption:motion,prompt:motion,model:start.model||model,source:'studio_video'}); }
-    else stFailCard(c,'video would not start: '+((start&&(start.error+(start.detail?' · '+String(start.detail).slice(0,140):'')))||'no response'));
+    if(start&&start.still&&!stu.base){ const sc=stCard('photo',{caption:'start frame: '+still}); stFillCard(sc,'photo',start.still,{caption:'start frame: '+still,prompt:still,model:body.stillModel||''}); }
+    if(start&&start.id){ await stPoll(c, start.id, {caption:motion,prompt:motion,model:start.model||model,source:'studio_video'}); }
+    else { stFailCard(c,'video would not start: '+((start&&(start.error+(start.detail?' · '+String(start.detail).slice(0,140):'')))||'no response')); libDirty=true; }
   }catch(e){ stFailCard(c,'request failed'); }
-  stStatus(''); stu.busy=false; document.getElementById('stVidGo').disabled=false;
+  stStatus(''); stBusy(false);
 }
 async function stExtend(videoUrl){
   if(stu.busy)return; const desc=prompt('What happens next? (5–10 s extension)','continue the scene naturally, smooth seamless motion'); if(desc===null)return;
-  stu.busy=true; const c=stCard('video',{caption:'extend: '+desc}); stStatus('extending…');
+  stBusy(true); const c=stCard('video',{caption:'extend: '+desc}); stStatus('extending…');
   try{
     const start=await callFn(VID_URL,{action:'extend', video:videoUrl, prompt:desc||'continue the scene naturally', duration:6, source:'studio_extend'});
     if(start&&start.id) await stPoll(c, start.id, {caption:'extend: '+desc,prompt:desc,model:start.model||'',source:'studio_extend'});
     else stFailCard(c,'extend would not start: '+((start&&(start.error+(start.detail?' · '+String(start.detail).slice(0,140):'')))||'no response'));
   }catch(e){ stFailCard(c,'request failed'); }
-  stStatus(''); stu.busy=false;
+  stStatus(''); stBusy(false);
 }
+let stHydrated=false, stHydrating=false;
 async function openStudio(){
   stv.style.display='flex';
-  if(!libLoaded){ try{ await loadLib(true); }catch(e){} }
-  if(!stu.results.length){
-    // pick up where you left off: recent Studio makes from the library
+  if(stHydrating)return;
+  if(!libLoaded){ stHydrating=true; try{ await loadLib(true); }catch(e){} stHydrating=false; }
+  if(!stHydrated && !stu.results.length){
+    stHydrated=true;
+    // pick up where you left off: recent Studio makes from the library (quiet: nothing new was made)
     const prev=(libItems||[]).filter(it=>/^studio/.test(it.source||'')).slice(0,24);
-    for(const it of prev.reverse()){ const c=stCard(it.kind,{caption:it.alt||it.prompt||''}); stFillCard(c,it.kind,it.url,{caption:it.alt||it.prompt||'',prompt:it.prompt||'',model:it.model||''}); }
+    for(const it of prev.reverse()){ const c=stCard(it.kind,{caption:it.alt||it.prompt||''}); stFillCard(c,it.kind,it.url,{caption:it.alt||it.prompt||'',prompt:it.prompt||'',model:it.model||''},true); }
   }
   stRenderPick();
 }

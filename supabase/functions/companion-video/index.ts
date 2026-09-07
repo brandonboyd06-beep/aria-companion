@@ -122,7 +122,11 @@ Deno.serve(async (req: Request) => {
   if (!still) {
     const sp = (b.stillPrompt || "a selfie of Aria smiling softly at the camera in her cozy home").toString().slice(0, 400);
     try {
-      const ir = await fetch(`${SUPA}/functions/v1/companion-image`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SRK, Authorization: `Bearer ${SRK}` }, body: JSON.stringify({ prompt: sp, raw: b.raw === true, model: b.stillModel || undefined, clientId: b.clientId || undefined, source: b.source ? `${String(b.source).slice(0, 24)}_still` : undefined }) });
+      const isStudio = /^studio/.test(String(b.source || ""));
+      // chat 🎬 stills stay out of the library (as before); Studio stills are saved with their own source
+      const stillBody: any = { prompt: sp, raw: b.stillRaw === true, model: b.stillModel || undefined };
+      if (isStudio) { stillBody.clientId = b.clientId || undefined; stillBody.source = `${String(b.source).slice(0, 24)}_still`; stillBody.noFallback = true; stillBody.alt = sp.slice(0, 60); }
+      const ir = await fetch(`${SUPA}/functions/v1/companion-image`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SRK, Authorization: `Bearer ${SRK}` }, body: JSON.stringify(stillBody) });
       const ij = await ir.json(); still = ij?.image || "";
     } catch { still = ""; }
   }
@@ -139,7 +143,7 @@ Deno.serve(async (req: Request) => {
       const res2 = await submit(key, startPayload(MODEL, still, motion, b));
       if (res2.ok) { res = res2; model = MODEL; }
     }
-    if (!res.ok) return out({ error: "upstream", status: res.status, detail: res.detail }, 502);
+    if (!res.ok) return out({ error: "upstream", status: res.status, detail: res.detail, still }, 502);
     return out({ id: res.id, still, status: "processing", model });
   } catch (e) { return out({ error: "fetch_failed", detail: String(e) }, 500); }
 });
