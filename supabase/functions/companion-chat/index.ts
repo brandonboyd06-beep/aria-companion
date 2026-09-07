@@ -102,8 +102,31 @@ async function embed(text: string): Promise<string | null> {
   } catch { return null; }
 }
 
-async function callClaude(key: string, model: string, system: string, msgs: any[], maxTokens: number) {
-  const body = { model, max_tokens: maxTokens, temperature: 1, system, messages: msgs };
+// Her reply envelope as a tool schema. Forcing this tool makes Claude return structured fields every
+// time (it had started answering in plain prose, which silently dropped scene/expression/image).
+const REPLY_TOOL = {
+  name: "aria_reply",
+  description: "Deliver Aria's reply to him along with what he sees on screen. Always use this tool; never answer in plain text.",
+  input_schema: {
+    type: "object",
+    properties: {
+      reply: { type: "string", description: "What Aria says, in her voice." },
+      expression: { type: "string", enum: ["warm", "flirty", "soft", "playful", "happy", "loving", "sad", "surprised", "neutral"], description: "The expression on her face as she says it." },
+      scene: { type: ["string", "null"], description: "One of the available scene keys, or null to leave the screen unchanged." },
+      image: {
+        type: ["object", "null"],
+        description: "A photo she attaches, or null. Required (not null) whenever he asks to see her or anything of hers.",
+        properties: { prompt: { type: "string", description: "Vivid single-frame description of exactly what is in the photo." }, alt: { type: "string", description: "2-4 word caption." } },
+        required: ["prompt"],
+      },
+    },
+    required: ["reply", "expression", "scene", "image"],
+  },
+};
+
+async function callClaude(key: string, model: string, system: string, msgs: any[], maxTokens: number, structured = false) {
+  const body: any = { model, max_tokens: maxTokens, temperature: 1, system, messages: msgs };
+  if (structured) { body.tools = [REPLY_TOOL]; body.tool_choice = { type: "tool", name: REPLY_TOOL.name }; }
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -112,8 +135,11 @@ async function callClaude(key: string, model: string, system: string, msgs: any[
   const txt = await r.text();
   if (!r.ok) return { ok: false, status: r.status, detail: txt.slice(0, 400) };
   let j: any; try { j = JSON.parse(txt); } catch { return { ok: false, status: 500, detail: "claude_parse" }; }
-  const text = (j?.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
-  return { ok: true, content: text, usage: j?.usage ?? null };
+  const blocks: any[] = j?.content || [];
+  const tool = blocks.find((c: any) => c.type === "tool_use" && c.input && typeof c.input === "object");
+  if (tool) return { ok: true, content: JSON.stringify(tool.input), usage: j?.usage ?? null, structured: true };
+  const text = blocks.filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
+  return { ok: true, content: text, usage: j?.usage ?? null, structured: false };
 }
 
 async function callGrok(key: string, model: string, system: string, msgs: any[], maxTokens: number) {
@@ -127,6 +153,41 @@ async function callGrok(key: string, model: string, system: string, msgs: any[],
   if (!r.ok) return { ok: false, status: r.status, detail: txt.slice(0, 400) };
   let j: any; try { j = JSON.parse(txt); } catch { return { ok: false, status: 500, detail: "grok_parse" }; }
   return { ok: true, content: (j?.choices?.[0]?.message?.content ?? "").toString(), usage: j?.usage ?? null };
+}
+
+// did he ask to see something? (the camera button sets wantPhoto; in chat we read his last line)
+const PHOTO_ASK = /\b(pic|pics|picture|photo|photos|selfie|snap|snapshot|show me|see you|see it|let me see|what (are|r) you wearing|send me (one|a|another)|another one)\b/i;
+function askedForPhoto(s: any, msgs: any[]): boolean {
+  if (s.wantPhoto) return true;
+  const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+  return !!(lastUser && PHOTO_ASK.test(String(lastUser.content).slice(-400)));
+}
+
+// Photo director: writes the image prompt for the photo she is sending when the brain did not attach one.
+// Grounded in what he asked and what she just said, so the picture matches her words.
+async function directPhoto(GK: string, AK: string, s: any, msgs: any[], reply: string, stageKey: string): Promise<{ prompt: string; alt: string } | null> {
+  const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+  const ask = lastUser ? String(lastUser.content).slice(-300) : "(he taps to see you)";
+  const sys = `You write the single-frame photo description for a picture Aria is sending to ${(s.playerName || "him").toString().slice(0, 40)}. Aria is an adult android companion living in a cozy home; she and he are at the "${stageKey}" stage of closeness. Describe exactly what is in the frame: her (in it, unless he asked for an object), the setting, wardrobe, pose, light, mood. Match what he asked for and what she just said; keep it consistent with their stage (never more explicit than the stage and her words imply; tasteful even when sensual). No text, logos, or other people. Return STRICT JSON only: {"prompt": "<one vivid paragraph, max 70 words>", "alt": "<2-4 word caption>"}`;
+  const user = `He asked: ${ask}\nHer reply as she sends it: ${reply || "(here)"}\nTime: ${String(s.localTime || "").slice(0, 60)}`;
+  const parse = (txt: string) => {
+    try { const fb = txt.indexOf("{"), lb = txt.lastIndexOf("}"); const j = JSON.parse(txt.slice(fb, lb + 1)); const prompt = String(j.prompt || "").trim(); if (!prompt) return null; return { prompt: prompt.slice(0, 400), alt: String(j.alt || "").slice(0, 60) }; } catch { return null; }
+  };
+  if (GK) {
+    try {
+      const r = await callGrok(GK, GROK_MODEL, sys, [{ role: "user", content: user }], 220);
+      if (r.ok) { const p = parse(r.content); if (p) return p; }
+    } catch { /* fall through */ }
+  }
+  if (AK) {
+    try {
+      const r = await callClaude(AK, CLAUDE_MODEL, sys, [{ role: "user", content: user }], 220);
+      if (r.ok) { const p = parse(r.content); if (p) return p; }
+    } catch { /* fall through */ }
+  }
+  // last resort: a deterministic, reply-grounded selfie
+  const gist = (reply || "").replace(/\s+/g, " ").slice(0, 160);
+  return { prompt: `A candid selfie Aria just took of herself in her home right now${gist ? `, in the moment she describes: "${gist}"` : ""}, natural light, looking into the camera`, alt: "right now" };
 }
 
 Deno.serve(async (req: Request) => {
@@ -157,8 +218,9 @@ Deno.serve(async (req: Request) => {
     else msgs.push({ role: "user", content: s.userMessage });
   } else if (s.wantPhoto) {
     const last = msgs[msgs.length - 1];
-    if (last && last.role === "user") last.content += "\n(he taps to see you)";
-    else msgs.push({ role: "user", content: "(he taps to see you)" });
+    const tap = "(he taps to see you — send the photo: reply in the strict JSON format with \"image\" filled in)";
+    if (last && last.role === "user") last.content += "\n" + tap;
+    else msgs.push({ role: "user", content: tap });
   }
   if (!msgs.length || msgs[msgs.length - 1].role !== "user") {
     msgs.push({ role: "user", content: "(he just walked up to you — open the conversation)" });
@@ -207,7 +269,7 @@ Deno.serve(async (req: Request) => {
   if (provider === "grok" && /claude/i.test(useModel)) useModel = GROK_MODEL;
 
   try {
-    let res = provider === "claude" ? await callClaude(AK, useModel, system, msgs, 500) : await callGrok(GK, useModel, system, msgs, 500);
+    let res = provider === "claude" ? await callClaude(AK, useModel, system, msgs, 700, true) : await callGrok(GK, useModel, system, msgs, 600);
     // cross-provider retry so she never goes silent
     let fallbackFrom: any = null;
     if (!res.ok) {
@@ -216,7 +278,7 @@ Deno.serve(async (req: Request) => {
       const altKey = alt === "claude" ? AK : GK;
       if (altKey) {
         const altModel = alt === "claude" ? CLAUDE_MODEL : GROK_MODEL;
-        const res2 = alt === "claude" ? await callClaude(AK, altModel, system, msgs, 500) : await callGrok(GK, altModel, system, msgs, 500);
+        const res2 = alt === "claude" ? await callClaude(AK, altModel, system, msgs, 700, true) : await callGrok(GK, altModel, system, msgs, 600);
         if (res2.ok) { res = res2; provider = alt; useModel = altModel; }
       }
     }
@@ -226,9 +288,9 @@ Deno.serve(async (req: Request) => {
     content = content.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const fb = content.indexOf("{"); const lb = content.lastIndexOf("}");
     if (fb >= 0 && lb > fb) content = content.slice(fb, lb + 1);
-    let reply = "", scene: any = null, image: any = null, expression: any = null;
+    let reply = "", scene: any = null, image: any = null, expression: any = null, parsed = false;
     try {
-      const j = JSON.parse(content);
+      const j = JSON.parse(content); parsed = true;
       reply = (j.reply ?? "").toString();
       scene = (j.scene === null || j.scene === undefined) ? null : String(j.scene);
       if (typeof j.expression === "string" && j.expression.trim()) expression = j.expression.trim().toLowerCase().slice(0, 20);
@@ -239,8 +301,20 @@ Deno.serve(async (req: Request) => {
     const allowed = new Set((Array.isArray(s.availableScenes) ? s.availableScenes : []).map((x: any) => x && x.key).filter(Boolean));
     if (scene && allowed.size && !allowed.has(scene)) scene = null;
     if (!reply) reply = "…";
+    // if the model answered in prose, keep only the first paragraph-ish so a dropped JSON envelope never leaks braces/keys
+    if (!parsed) reply = reply.replace(/^\s*\{?\s*"?reply"?\s*:\s*"?/i, "").replace(/"\s*,\s*"expression".*$/is, "").trim() || "…";
 
-    return out({ reply, scene, image, expression, engine: `${provider}:${useModel}`, fallbackFrom, stage: stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key, usage: res.usage ?? null });
+    const stageKey = stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key;
+    let photoBy: string | null = null;
+    if (!image && askedForPhoto(s, msgs)) {
+      image = await directPhoto(GK, AK, s, msgs, reply, stageKey);
+      photoBy = image ? "director" : null;
+    }
+
+    const body: any = { reply, scene, image, expression, engine: `${provider}:${useModel}`, fallbackFrom, stage: stageKey, usage: res.usage ?? null };
+    if (photoBy) body.photoBy = photoBy;
+    if (s.debug === true) { body.debug = { parsed, structured: !!(res as any).structured, raw: content.slice(0, 900) }; }
+    return out(body);
   } catch (e) {
     return out({ error: "fetch_failed", detail: String(e) }, 500);
   }

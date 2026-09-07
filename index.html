@@ -170,7 +170,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.22"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.23"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -604,8 +604,9 @@ async function ariaInitiate(){
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
     awayFor=null; markSeen();
   }catch(e){hideTyping();}
-  finally{busy=false;convInput.focus();}
+  finally{busy=false;convInput.focus();runQueuedSelfie();}
 }
+function runQueuedSelfie(){ if(window._selfieQueued){ window._selfieQueued=false; setTimeout(()=>{ try{requestSelfie();}catch(e){} },120); } }
 function closeConv(){if(window._callMode)endCall();convOpen=false;conv.classList.remove('show');chatSceneKey=null;
   document.getElementById('navL').style.display='';document.getElementById('navR').style.display='';
   act=null;refresh();}
@@ -614,7 +615,8 @@ talkEl.onclick=openConv;
 
 // camera button: ask Aria for a photo of herself right now — forced, always delivers one
 async function requestSelfie(){
-  if(busy)return;busy=true;
+  if(busy){ window._selfieQueued=true; return; } // she's mid-reply: send the photo right after
+  busy=true;
   addMsg('user','📷');S.transcript.push({role:'user',content:'(asks to see you right now)'});save();showTyping();
   try{
     const res=await callFn(CHAT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,milestones:S.milestones,
@@ -791,7 +793,7 @@ async function sendMsg(text){
     awayFor=null; markSeen();
     if(S.sinceReflect>=4)doReflect();
   }catch(e){hideTyping();addMsg('assistant','*Something flickers.* Sorry — try again?');}
-  finally{busy=false;convInput.focus();}
+  finally{busy=false;convInput.focus();runQueuedSelfie();}
 }
 async function doReflect(){
   S.sinceReflect=0;save();
