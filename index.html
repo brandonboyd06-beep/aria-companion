@@ -269,10 +269,10 @@ async function init(){
       }
     }catch(e){}
   }
-  // no saved look → NO stand-in rig (never the anime one). The room scene stays and a small hint offers to create her face.
-  if(!blob){ noLook(); return; }
+  // no saved look → Aria's built-in face (a realistic rig with full facial blendshapes; never the anime one)
+  const urls=blob?[URL.createObjectURL(blob),'./vendor/models/aria.glb']:['./vendor/models/aria.glb'];
   const loader=new GLTFLoader(); loader.register((p)=>new VRMLoaderPlugin(p));
-  for(const url of [URL.createObjectURL(blob)]){
+  for(const url of urls){
     try{
       const gltf=await loader.loadAsync(url);
       const v=gltf.userData.vrm;
@@ -349,7 +349,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.20"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.21"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).

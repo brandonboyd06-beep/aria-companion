@@ -73,8 +73,7 @@ const pick=qs.get('m');
 const ARM_OVERRIDE=parseFloat(qs.get('arms')||'');
 // default is the REALISTIC rig (never the anime one); the vrm list is only a last resort if the glb fails to load
 const MODEL_URLS=GLB_URL?[normalizeGlbUrl(GLB_URL)]:(pick?["./vendor/models/"+pick+".vrm"]:[
-  "./vendor/models/avaturn_demo.glb",
-  "./vendor/models/twist.vrm"
+  "./vendor/models/aria.glb"
 ]);
 // her look follows the ACCOUNT (same id the app uses), so it survives Safari vs home-screen app vs another phone
 let ACCOUNT_ID=''; try{ ACCOUNT_ID=localStorage.getItem('aria.account_id')||localStorage.getItem('aria.client_id')||''; }catch(e){}
@@ -400,8 +399,8 @@ function animate(){
   }
   await loadModel(urls);
   applyMood();
-  // nothing saved for this account yet → go straight to creating her (the stand-in is only a placeholder)
-  if(window.__noLook){ setStatus('she has no face yet — create her look'); openCreator(); }
+  // nothing saved for this account → she wears her built-in look; ✨ New look still opens the creator
+  if(window.__noLook){ setStatus('this is her built-in look — tap ✨ New look to make your own'); }
 })();
 animate();
 </script>
