@@ -7,8 +7,15 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const ATLAS = "https://api.atlascloud.ai/api/v1";
-// Aria's look: a consistent, photorealistic human (uncensored Flux). NOT cartoon/3D.
-const ARIA_LOOK = "Aria, the same beautiful photorealistic woman every time: mid-20s, warm sun-kissed tan skin, a fit and toned athletic figure, flawless smooth skin, a natural C-cup bust, long wavy chestnut-brown hair, warm brown eyes, full lips, and a radiant friendly smile";
+// Aria's look: a consistent, photorealistic human. NOT cartoon/3D.
+// 2026-09-07 bake-off (9 models x 4 tiers, 3 blind judges): z-image/turbo and qwen-image-2.0-pro were the only
+// models rendering every tier uncensored; z-image won on identity consistency, ~9 s and $0.005/image
+// (qwen: most photoreal skin, ~40 s, $0.06, 6-7 MB PNGs). Flux-dev sanitized the topless tier.
+const DEFAULT_MODEL = "z-image/turbo";
+const ARIA_BASE = "Aria, the same beautiful photorealistic woman every time: mid-20s, warm sun-kissed tan skin, a fit and toned athletic figure, flawless smooth skin, long wavy chestnut-brown hair, warm brown eyes, full lips, and a radiant friendly smile";
+// the bust note only when the scene is already intimate — otherwise a plain kitchen selfie tends to lose its top
+const INTIMATE = /\b(lingerie|bikini|swimsuit|bra\b|panties|topless|nude|naked|undress|shower|bath|bed(room)?|sheets?|seductive|sexy|sultry|tease|strip|cleavage|bust|breasts?|boobs?|thong|robe)\b/i;
+function ariaLook(prompt: string): string { return INTIMATE.test(prompt) ? ARIA_BASE.replace("flawless smooth skin,", "flawless smooth skin, a natural C-cup bust,") : ARIA_BASE; }
 const ARIA_STYLE = "Photorealistic, captured like a real high-quality photograph, realistic skin texture and detail, natural soft lighting, lifelike and cinematic. Not a cartoon, not 3D animation, not an illustration.";
 
 function b64ToBytes(b64: string): Uint8Array {
@@ -69,13 +76,13 @@ Deno.serve(async (req: Request) => {
   try { b = await req.json(); } catch { return out({ error: "bad_json" }, 400); }
   let prompt = (b.prompt || "").toString().trim().slice(0, 600);
   if (!prompt) return out({ error: "no_prompt" }, 400);
-  prompt = `${prompt}. If a woman appears, she is always the same person: ${ARIA_LOOK}. ${ARIA_STYLE}`;
+  prompt = `${prompt}. If a woman appears, she is always the same person: ${ariaLook(prompt)}. ${ARIA_STYLE}`;
 
   const SUPA = Deno.env.get("SUPABASE_URL")!; const SRK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const sb = createClient(SUPA, SRK);
 
   // resolve configured provider/model (swappable without redeploy)
-  let provider = "atlascloud", model = "bytedance/seedream-v4";
+  let provider = "atlascloud", model = DEFAULT_MODEL;
   try { const { data } = await sb.from("companion_config").select("value").eq("key", "image").maybeSingle(); if (data?.value) { provider = data.value.provider || provider; model = data.value.model || model; } } catch { /* defaults */ }
   if (b.model) model = String(b.model);
   if (b.provider) provider = String(b.provider);
@@ -85,6 +92,7 @@ Deno.serve(async (req: Request) => {
   try { src = provider === "grok" ? await genGrok(prompt) : await genAtlas(model, prompt); } catch { src = null; }
   if (!src) { used = provider === "grok" ? "atlascloud" : "grok"; try { src = used === "grok" ? await genGrok(prompt) : await genAtlas(model, prompt); } catch { src = null; } }
   if (!src) return out({ error: "gen_failed" }, 502);
+  if (used === "grok") model = "grok-imagine-image"; // truthful: this is what actually drew it
 
   // mirror to our public bucket → reliable, persistent URL
   const got = await toBytes(src);
