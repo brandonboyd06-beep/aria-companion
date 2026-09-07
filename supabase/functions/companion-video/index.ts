@@ -117,12 +117,12 @@ Deno.serve(async (req: Request) => {
   // ---- start a new job: ensure a first-frame still, then submit ----
   const baseMotion = (b.prompt || "a short, warm clip with gentle natural movement and a soft smile").toString().slice(0, 1400);
   // keep the video photorealistic and consistent with the source still
-  const motion = `${baseMotion}. Keep a photorealistic, lifelike look consistent with the source photo; natural realistic movement, not a cartoon or animation.`;
+  const motion = b.raw === true ? baseMotion : `${baseMotion}. Keep a photorealistic, lifelike look consistent with the source photo; natural realistic movement, not a cartoon or animation.`;
   let still = (typeof b.imageUrl === "string" && /^https?:\/\//.test(b.imageUrl)) ? b.imageUrl : "";
   if (!still) {
     const sp = (b.stillPrompt || "a selfie of Aria smiling softly at the camera in her cozy home").toString().slice(0, 400);
     try {
-      const ir = await fetch(`${SUPA}/functions/v1/companion-image`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SRK, Authorization: `Bearer ${SRK}` }, body: JSON.stringify({ prompt: sp }) });
+      const ir = await fetch(`${SUPA}/functions/v1/companion-image`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SRK, Authorization: `Bearer ${SRK}` }, body: JSON.stringify({ prompt: sp, raw: b.raw === true, model: b.stillModel || undefined, clientId: b.clientId || undefined, source: b.source ? `${String(b.source).slice(0, 24)}_still` : undefined }) });
       const ij = await ir.json(); still = ij?.image || "";
     } catch { still = ""; }
   }

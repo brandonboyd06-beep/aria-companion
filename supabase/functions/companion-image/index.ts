@@ -25,13 +25,19 @@ function b64ToBytes(b64: string): Uint8Array {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // AtlasCloud async image gen (Seedream / Flux / etc). Returns a hosted image URL or null.
-async function genAtlas(model: string, prompt: string): Promise<string | null> {
+async function genAtlas(model: string, prompt: string, extras: any = {}): Promise<string | null> {
   const key = Deno.env.get("ATLASCLOUD_API_KEY"); if (!key) return null;
-  const r = await fetch(`${ATLAS}/model/generateImage`, {
+  const hasExtras = Object.keys(extras || {}).length > 0;
+  let r = await fetch(`${ATLAS}/model/generateImage`, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, prompt }),
+    body: JSON.stringify({ model, prompt, ...(extras || {}) }),
   });
-  const txt = await r.text(); let j: any; try { j = JSON.parse(txt); } catch { j = null; }
+  let txt = await r.text(); let j: any; try { j = JSON.parse(txt); } catch { j = null; }
+  if ((!r.ok || !j) && hasExtras && (r.status === 400 || r.status === 422)) {
+    // this model does not take those knobs — generate without them rather than fail
+    r = await fetch(`${ATLAS}/model/generateImage`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, prompt }) });
+    txt = await r.text(); try { j = JSON.parse(txt); } catch { j = null; }
+  }
   if (!r.ok || !j) return null;
   const id = j?.data?.id; if (!id) { return j?.data?.outputs?.[0] || null; }
   for (let i = 0; i < 45; i++) {
@@ -144,7 +150,7 @@ Deno.serve(async (req: Request) => {
     let emodel = DEFAULT_EDIT_MODEL, efallback = EDIT_FALLBACK;
     try { const { data } = await sb.from("companion_config").select("value").eq("key", "image_edit").maybeSingle(); if (data?.value?.model) emodel = String(data.value.model); if (data?.value?.alt) efallback = String(data.value.alt); } catch { /* default */ }
     if (b.model) emodel = String(b.model);
-    const instruction = `Edit this photo of Aria: ${prompt}. Keep her the same person (same face, hair, skin tone and body) and keep everything not mentioned unchanged. Photorealistic, natural lighting, like a real photograph.`;
+    const instruction = b.raw === true ? prompt : `Edit this photo of Aria: ${prompt}. Keep her the same person (same face, hair, skin tone and body) and keep everything not mentioned unchanged. Photorealistic, natural lighting, like a real photograph.`;
     let res = await genAtlasEdit(emodel, instruction, imageUrl);
     let usedEditor = emodel;
     if (!res.image && !b.model && efallback && efallback !== emodel) {
@@ -156,7 +162,12 @@ Deno.serve(async (req: Request) => {
     return await deliver(res.image, { model: usedEditor, provider: "atlascloud", source: b.source ? String(b.source).slice(0, 30) : "edit", extra: { from: imageUrl, instruction: prompt.slice(0, 300) } });
   }
 
-  prompt = `${prompt}. If a woman appears, she is always the same person: ${ariaLook(prompt)}. ${ARIA_STYLE}`;
+  // Studio raw mode: the prompt goes to the model exactly as written (no Aria look, no style clause)
+  if (b.raw !== true) prompt = `${prompt}. If a woman appears, she is always the same person: ${ariaLook(prompt)}. ${ARIA_STYLE}`;
+  const extras: any = {};
+  if (typeof b.size === "string" && /^\d{3,4}\*\d{3,4}$/.test(b.size)) extras.size = b.size;
+  if (Number.isInteger(b.seed) && b.seed >= 0) extras.seed = b.seed;
+  if (typeof b.negative === "string" && b.negative.trim()) extras.negative_prompt = b.negative.trim().slice(0, 300);
 
   // resolve configured provider/model (swappable without redeploy)
   let provider = "atlascloud", model = DEFAULT_MODEL;
@@ -166,8 +177,8 @@ Deno.serve(async (req: Request) => {
 
   // generate (with cross-provider fallback so a still always comes back)
   let src: string | null = null; let used = provider;
-  try { src = provider === "grok" ? await genGrok(prompt) : await genAtlas(model, prompt); } catch { src = null; }
-  if (!src) { used = provider === "grok" ? "atlascloud" : "grok"; try { src = used === "grok" ? await genGrok(prompt) : await genAtlas(model, prompt); } catch { src = null; } }
+  try { src = provider === "grok" ? await genGrok(prompt) : await genAtlas(model, prompt, extras); } catch { src = null; }
+  if (!src && b.noFallback !== true) { used = provider === "grok" ? "atlascloud" : "grok"; try { src = used === "grok" ? await genGrok(prompt) : await genAtlas(model, prompt, extras); } catch { src = null; } }
   if (!src) return out({ error: "gen_failed" }, 502);
   if (used === "grok") model = "grok-imagine-image"; // truthful: this is what actually drew it
 

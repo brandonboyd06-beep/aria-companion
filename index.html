@@ -69,6 +69,29 @@
   #libDetail{position:fixed;inset:0;z-index:47;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(6,4,5,.96);padding:14px}
   #libDetail img,#libDetail video{max-width:96vw;max-height:70vh;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.6)}
   .libAct{padding:9px 14px;border-radius:12px;border:1px solid rgba(232,184,138,.35);background:rgba(28,24,21,.7);color:#e8c6a3;font-family:Inter,sans-serif;font-size:13px;cursor:pointer}
+  #studio{position:fixed;inset:0;z-index:48;display:none;flex-direction:column;background:rgba(8,6,7,.97);backdrop-filter:blur(10px);font-family:Inter,sans-serif}
+  #stTabs button{background:transparent;border:1px solid rgba(255,255,255,.1);color:#9a8e7e;font-family:inherit;font-size:12px;letter-spacing:.12em;text-transform:uppercase;padding:7px 14px;border-radius:999px;cursor:pointer}
+  #stTabs button.on{border-color:rgba(232,184,138,.6);color:#e8c6a3;background:rgba(232,184,138,.1)}
+  .stPane{display:none;padding:6px 14px 0}.stPane.on{display:block}
+  .stField{display:block;width:100%;box-sizing:border-box;background:rgba(28,24,21,.9);border:1px solid rgba(232,184,138,.25);color:#f4ece1;font-family:Inter,sans-serif;font-size:14px;padding:10px 12px;border-radius:12px;outline:none;margin:6px 0}
+  textarea.stField{resize:vertical;min-height:72px;font-size:15px}
+  .stRow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.stRow>*{flex:1;min-width:120px}
+  .stRow label.chk{flex:0 0 auto;min-width:0;display:flex;align-items:center;gap:6px;font-size:12px;color:#cdb89a;padding:6px 4px}
+  .stGo{padding:11px 18px;border-radius:12px;border:none;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-weight:600;font-family:inherit;font-size:14px;cursor:pointer}
+  .stGo:disabled{opacity:.5;cursor:default}
+  #stBaseBox{display:flex;gap:10px;align-items:center;margin:6px 0}
+  #stBaseBox img{width:72px;height:96px;object-fit:cover;border-radius:10px;border:1px solid rgba(232,184,138,.3);background:#1a1512}
+  #stPick{display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px;-webkit-overflow-scrolling:touch}
+  #stPick img{width:54px;height:72px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,.08);flex:0 0 auto;cursor:pointer}
+  #stPick img.on{border-color:rgba(232,184,138,.9)}
+  #stResults{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;padding:8px 14px 40px}
+  .stCard{background:#14100e;border:1px solid rgba(232,184,138,.14);border-radius:12px;overflow:hidden}
+  .stCard img,.stCard video{width:100%;display:block;aspect-ratio:3/4;object-fit:cover;background:#1a1512}
+  .stCard .cap{font-size:11px;color:#9a8e7e;padding:6px 8px 2px;line-height:1.35;max-height:3.9em;overflow:hidden}
+  .stCard .acts{display:flex;flex-wrap:wrap;gap:4px;padding:6px 8px 8px}
+  .stCard .acts button{font-size:11px;padding:4px 8px;border-radius:8px;border:1px solid rgba(232,184,138,.3);background:rgba(28,24,21,.7);color:#e8c6a3;font-family:inherit;cursor:pointer}
+  .stCard.busy{opacity:.7}.stCard .ph{aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;color:#9a8e7e;font-family:Newsreader,serif;font-style:italic;font-size:14px}
+  #stStatus{padding:6px 14px;font-size:12px;color:#9a8e7e;min-height:1.5em}
   #convChat{position:relative;z-index:2;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;padding:18vh 7vw 14px;display:flex;flex-direction:column;gap:14px;mask-image:linear-gradient(180deg,transparent,#000 18%);}
   #convChat>:first-child{margin-top:auto;}
   #convChat::-webkit-scrollbar{width:0}
@@ -183,7 +206,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.29"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.30"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -1127,7 +1150,7 @@ document.getElementById('openJournal').onclick=()=>{ setPanel.style.display='non
 /* ── her photos & videos: everything she has ever sent, kept ── */
 const MEDIA_URL=SUPA+"/functions/v1/companion-media";
 const lv=document.createElement('div'); lv.id='libView';
-lv.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:max(18px,env(safe-area-inset-top)) 20px 8px"><div style="font-family:Newsreader,serif;letter-spacing:.24em;text-indent:.24em;font-size:19px;color:#f4ece1">HER PHOTOS</div><div id="lvClose" style="font-size:13px;letter-spacing:.2em;color:#9a8e7e;text-transform:uppercase;cursor:pointer">Close</div></div>'
+lv.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:max(18px,env(safe-area-inset-top)) 20px 8px"><div style="font-family:Newsreader,serif;letter-spacing:.24em;text-indent:.24em;font-size:19px;color:#f4ece1">HER PHOTOS</div><div style="display:flex;gap:14px;align-items:center"><div id="lvStudio" style="font-size:13px;letter-spacing:.2em;color:#e8c6a3;text-transform:uppercase;cursor:pointer">🎨 Studio</div><div id="lvClose" style="font-size:13px;letter-spacing:.2em;color:#9a8e7e;text-transform:uppercase;cursor:pointer">Close</div></div></div>'
  +'<div id="libTabs" style="display:flex;gap:8px;padding:4px 16px 8px"><button data-k="all" class="on">All</button><button data-k="photo">Photos</button><button data-k="video">Videos</button><span id="libCount" style="margin-left:auto;font-size:12px;color:#6f665b;align-self:center"></span></div>'
  +'<div id="libScroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"><div id="libGrid"></div><div id="libEmpty" style="display:none;text-align:center;color:#9a8e7e;font-family:Newsreader,serif;font-style:italic;font-size:15px;padding:40px 20px">nothing here yet — ask her for a picture</div></div>';
 document.body.appendChild(lv);
@@ -1183,6 +1206,173 @@ document.getElementById('lvClose').onclick=closeLibrary;
 document.getElementById('libTabs').onclick=(e)=>{ const b=e.target.closest('button'); if(!b)return; libKind=b.dataset.k; for(const x of document.querySelectorAll('#libTabs button'))x.classList.toggle('on',x===b); renderLib(); };
 document.getElementById('convLib').onclick=openLibrary;
 document.getElementById('openLibrary').onclick=()=>{ setPanel.style.display='none'; openLibrary(); };
+
+/* ── STUDIO: a plain generation workspace on the same models Aria uses. Nothing here touches the conversation. ── */
+const ST_IMAGE_MODELS=[
+  ['z-image/turbo','z-image turbo · default (fast, uncensored)'],
+  ['qwen/qwen-image-2.0-pro/text-to-image','Qwen Image 2.0 Pro · most photoreal (slow)'],
+  ['black-forest-labs/flux-dev','Flux dev'],
+  ['alibaba/wan-2.7-pro/text-to-image','Wan 2.7 Pro'],
+  ['bytedance/seedream-v5.0-pro/text-to-image','Seedream 5 Pro (filtered)'],
+];
+const ST_EDIT_MODELS=[
+  ['qwen/qwen-image-2.0/edit','Qwen Image 2.0 · default'],
+  ['alibaba/wan-2.7/image-edit','Wan 2.7 image edit'],
+  ['qwen/qwen-image-2.0-pro/edit','Qwen Image 2.0 Pro edit'],
+  ['bytedance/seedream-v5.0-pro/edit','Seedream 5 Pro edit (filtered)'],
+  ['black-forest-labs/flux-kontext-dev','Flux Kontext dev'],
+];
+const ST_VIDEO_MODELS=[
+  ['atlascloud/wan-2.2/image-to-video','Wan 2.2 · default (uncensored)'],
+  ['alibaba/wan-2.6/image-to-video','Wan 2.6 (with audio)'],
+  ['xai/grok-imagine-video/image-to-video','Grok Imagine video'],
+  ['bytedance/seedance-v1.5-pro/image-to-video','Seedance 1.5 Pro'],
+];
+const ST_SIZES=[['','model default'],['1024*1024','1024 × 1024 square'],['1024*1536','1024 × 1536 portrait'],['1536*1024','1536 × 1024 landscape'],['768*1344','768 × 1344 tall']];
+const stu={tab:'image',base:null,results:[],busy:false};
+const stv=document.createElement('div'); stv.id='studio';
+const opts=(arr,sel)=>arr.map(([v,l])=>'<option value="'+v+'"'+(v===sel?' selected':'')+'>'+l+'</option>').join('');
+stv.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:max(18px,env(safe-area-inset-top)) 20px 6px"><div style="font-family:Newsreader,serif;letter-spacing:.24em;text-indent:.24em;font-size:19px;color:#f4ece1">STUDIO</div><div id="stClose" style="font-size:13px;letter-spacing:.2em;color:#9a8e7e;text-transform:uppercase;cursor:pointer">Close</div></div>'
+ +'<div style="padding:0 20px 6px;font-size:11px;color:#6f665b;line-height:1.5">Same models Aria uses, full control over the prompt. Everything you make is saved to her library; nothing here enters your conversation.</div>'
+ +'<div id="stTabs" style="display:flex;gap:8px;padding:4px 14px 6px"><button data-t="image" class="on">Image</button><button data-t="edit">Edit</button><button data-t="video">Video</button></div>'
+ +'<div id="stScroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch">'
+ +'<div class="stPane on" data-p="image">'
+ +'<textarea id="stPrompt" class="stField" placeholder="describe the image exactly as you want it…"></textarea>'
+ +'<div class="stRow"><select id="stModel" class="stField">'+opts(ST_IMAGE_MODELS,'z-image/turbo')+'</select><select id="stSize" class="stField">'+opts(ST_SIZES,'')+'</select></div>'
+ +'<div class="stRow"><input id="stSeed" class="stField" type="number" min="0" placeholder="seed (optional)"><select id="stCount" class="stField"><option value="1">1 image</option><option value="2">2 images</option><option value="3">3 images</option><option value="4">4 images</option></select></div>'
+ +'<input id="stNeg" class="stField" placeholder="negative prompt (optional, models that support it)">'
+ +'<div class="stRow" style="margin:4px 0 10px"><label class="chk"><input type="checkbox" id="stLook" checked> Aria’s look &amp; style</label><button id="stGen" class="stGo">Generate</button></div>'
+ +'</div>'
+ +'<div class="stPane" data-p="edit">'
+ +'<div id="stBaseBox"><img id="stBaseImg" alt=""><div style="flex:1;font-size:12px;color:#9a8e7e;line-height:1.5"><div id="stBaseLabel">No base image yet — tap one below, or paste a URL.</div><input id="stBaseUrl" class="stField" placeholder="https://… image URL" style="margin:6px 0 0"></div></div>'
+ +'<div id="stPick"></div>'
+ +'<textarea id="stEditPrompt" class="stField" placeholder="what should change? e.g. red lace, hair up, put her on a beach…"></textarea>'
+ +'<div class="stRow"><select id="stEditModel" class="stField">'+opts(ST_EDIT_MODELS,'qwen/qwen-image-2.0/edit')+'</select></div>'
+ +'<div class="stRow" style="margin:4px 0 10px"><label class="chk"><input type="checkbox" id="stEditKeep" checked> keep her identity (wrapper)</label><button id="stEditGo" class="stGo">Apply edit</button></div>'
+ +'</div>'
+ +'<div class="stPane" data-p="video">'
+ +'<div id="stVBaseBox" style="display:flex;gap:10px;align-items:center;margin:6px 0"><img id="stVBaseImg" alt="" style="width:72px;height:96px;object-fit:cover;border-radius:10px;border:1px solid rgba(232,184,138,.3);background:#1a1512"><div style="flex:1;font-size:12px;color:#9a8e7e;line-height:1.5"><div id="stVBaseLabel">Start frame: none — tap an image below, or leave empty and describe a still to generate first.</div></div></div>'
+ +'<div id="stVPick" style="display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px"></div>'
+ +'<input id="stStill" class="stField" placeholder="if no start frame: describe the still to generate first (optional)">'
+ +'<textarea id="stMotion" class="stField" placeholder="what happens in the clip (motion, camera, mood)…"></textarea>'
+ +'<div class="stRow"><select id="stVidModel" class="stField">'+opts(ST_VIDEO_MODELS,'atlascloud/wan-2.2/image-to-video')+'</select><select id="stDur" class="stField"><option value="3">3 s</option><option value="5" selected>5 s</option><option value="8">8 s</option><option value="10">10 s</option></select><select id="stRes" class="stField"><option value="720p" selected>720p</option><option value="480p">480p</option></select></div>'
+ +'<div class="stRow" style="margin:4px 0 10px"><label class="chk"><input type="checkbox" id="stVRaw"> raw motion prompt (no realism clause)</label><button id="stVidGo" class="stGo">Generate video</button></div>'
+ +'</div>'
+ +'<div id="stStatus"></div><div id="stResults"></div></div>';
+document.body.appendChild(stv);
+const stStatus=(t)=>{ const e=document.getElementById('stStatus'); if(e)e.textContent=t||''; };
+function stTab(t){ stu.tab=t; for(const b of document.querySelectorAll('#stTabs button'))b.classList.toggle('on',b.dataset.t===t); for(const p of document.querySelectorAll('.stPane'))p.classList.toggle('on',p.dataset.p===t); if(t!=='image')stRenderPick(); }
+document.getElementById('stTabs').onclick=(e)=>{ const b=e.target.closest('button'); if(b)stTab(b.dataset.t); };
+function stSetBase(url){ stu.base=url||null; for(const id of ['stBaseImg','stVBaseImg']){ const im=document.getElementById(id); im.src=url||''; im.style.visibility=url?'visible':'hidden'; } document.getElementById('stBaseLabel').textContent=url?'Base image set.':'No base image yet — tap one below, or paste a URL.'; document.getElementById('stVBaseLabel').textContent=url?'Start frame set.':'Start frame: none — tap an image below, or leave empty and describe a still to generate first.'; stRenderPick(); }
+document.getElementById('stBaseUrl').onchange=(e)=>{ const u=e.target.value.trim(); if(/^https?:\/\//.test(u))stSetBase(u); };
+function stRenderPick(){
+  const mine=stu.results.filter(r=>r.kind==='photo'&&r.url).map(r=>r.url);
+  const lib=(libItems||[]).filter(it=>it.kind==='photo').map(it=>it.url);
+  const urls=[...new Set(mine.concat(lib))].slice(0,40);
+  for(const id of ['stPick','stVPick']){ const box=document.getElementById(id); box.innerHTML=''; for(const u of urls){ const im=document.createElement('img'); im.src=u; im.loading='lazy'; if(u===stu.base)im.classList.add('on'); im.onclick=()=>stSetBase(u); box.appendChild(im); } }
+}
+function stCard(kind, meta){
+  const c=document.createElement('div'); c.className='stCard busy'; c.innerHTML='<div class="ph">'+(kind==='video'?'filming…':'developing…')+'</div><div class="cap">'+(meta.caption||'').replace(/[<>&]/g,'')+'</div>';
+  const grid=document.getElementById('stResults'); grid.insertBefore(c, grid.firstChild); return c;
+}
+function stFillCard(c, kind, url, meta){
+  c.className='stCard'; c.innerHTML='';
+  if(kind==='video'){ const v=document.createElement('video'); v.src=url; v.controls=true; v.playsInline=true; v.setAttribute('playsinline',''); v.preload='metadata'; c.appendChild(v); }
+  else { const im=document.createElement('img'); im.src=url; im.loading='lazy'; im.onclick=()=>openLightbox(url); c.appendChild(im); }
+  const cap=document.createElement('div'); cap.className='cap'; cap.textContent=(meta.caption||'')+(meta.model?(' · '+meta.model.split('/').slice(-2).join('/')):''); c.appendChild(cap);
+  const acts=document.createElement('div'); acts.className='acts';
+  const mk=(l,fn)=>{ const b=document.createElement('button'); b.textContent=l; b.onclick=fn; acts.appendChild(b); };
+  if(kind==='photo'){ mk('✏️ Edit',()=>{ stSetBase(url); stTab('edit'); document.getElementById('stScroll').scrollTop=0; }); mk('🎬 Video',()=>{ stSetBase(url); stTab('video'); document.getElementById('stScroll').scrollTop=0; }); }
+  else { mk('➕ Extend',()=>stExtend(url)); }
+  mk('↗ Open',()=>{ try{ window.open(url,'_blank'); }catch(e){} });
+  if(meta.prompt) mk('⧉ Prompt',()=>{ try{ navigator.clipboard.writeText(meta.prompt); stStatus('prompt copied'); }catch(e){} });
+  c.appendChild(acts);
+  stu.results.unshift({kind,url,prompt:meta.prompt||'',model:meta.model||''}); libDirty=true; stRenderPick();
+}
+function stFailCard(c, msg){ c.className='stCard'; c.innerHTML='<div class="ph" style="color:#e69b9b;font-size:12px;padding:10px;text-align:center">'+msg.replace(/[<>&]/g,'')+'</div>'; }
+async function stGenerate(){
+  const prompt=document.getElementById('stPrompt').value.trim(); if(!prompt||stu.busy)return;
+  const model=document.getElementById('stModel').value, size=document.getElementById('stSize').value, seedV=document.getElementById('stSeed').value, count=Math.max(1,Math.min(4,Number(document.getElementById('stCount').value)||1));
+  const neg=document.getElementById('stNeg').value.trim(), look=document.getElementById('stLook').checked;
+  stu.busy=true; document.getElementById('stGen').disabled=true;
+  for(let i=0;i<count;i++){
+    const c=stCard('photo',{caption:prompt});
+    stStatus('generating '+(i+1)+' of '+count+' on '+model+'…');
+    try{
+      const body={prompt, model, raw:!look, clientId:CLIENT_ID, source:'studio', alt:prompt.slice(0,60), noFallback:true};
+      if(size)body.size=size; if(seedV!=='')body.seed=Math.max(0,Number(seedV)+i); if(neg)body.negative=neg;
+      const r=await fetch(IMG_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});
+      let j=null; try{ j=await r.json(); }catch(e){}
+      if(j&&j.image) stFillCard(c,'photo',j.image,{caption:prompt,prompt,model:j.model||model});
+      else stFailCard(c,'no image: '+((j&&(j.error+(j.detail?' · '+j.detail:'')))||('http '+r.status)));
+    }catch(e){ stFailCard(c,'request failed'); }
+  }
+  stStatus(''); stu.busy=false; document.getElementById('stGen').disabled=false;
+}
+async function stEditGo(){
+  const instr=document.getElementById('stEditPrompt').value.trim(); if(!instr||!stu.base||stu.busy){ if(!stu.base)stStatus('pick a base image first'); return; }
+  const model=document.getElementById('stEditModel').value, keep=document.getElementById('stEditKeep').checked;
+  stu.busy=true; document.getElementById('stEditGo').disabled=true;
+  const c=stCard('photo',{caption:'edit: '+instr}); stStatus('editing on '+model+'…');
+  try{
+    const r=await fetch(IMG_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({action:'edit', imageUrl:stu.base, prompt:instr, model, raw:!keep, clientId:CLIENT_ID, source:'studio_edit', alt:instr.slice(0,60)})});
+    let j=null; try{ j=await r.json(); }catch(e){}
+    if(j&&j.image) stFillCard(c,'photo',j.image,{caption:'edit: '+instr,prompt:instr,model:j.model||model});
+    else stFailCard(c,'edit failed: '+((j&&(j.error+(j.detail?' · '+String(j.detail).slice(0,120):'')))||('http '+r.status)));
+  }catch(e){ stFailCard(c,'request failed'); }
+  stStatus(''); stu.busy=false; document.getElementById('stEditGo').disabled=false;
+}
+async function stPoll(c, id, meta){
+  for(let tries=0;tries<110;tries++){
+    await new Promise(r=>setTimeout(r,4000));
+    let p=null; try{ p=await callFn(VID_URL,{action:'poll',id, prompt:meta.prompt||'', source:meta.source||'studio_video'}); }catch(e){}
+    if(p&&p.status==='done'&&p.video){ stFillCard(c,'video',p.video,meta); return true; }
+    if(p&&p.status==='failed'){ stFailCard(c,'video failed'+(p.error?(': '+String(p.error).slice(0,120)):'')); return false; }
+    stStatus('rendering… '+Math.round(tries*4/60*10)/10+' min');
+  }
+  stFailCard(c,'video is taking too long — check the library later'); return false;
+}
+async function stVideoGo(){
+  const motion=document.getElementById('stMotion').value.trim(); const still=document.getElementById('stStill').value.trim();
+  if(!motion||stu.busy)return; if(!stu.base&&!still){ stStatus('set a start frame or describe a still to generate first'); return; }
+  const model=document.getElementById('stVidModel').value, duration=Number(document.getElementById('stDur').value)||5, resolution=document.getElementById('stRes').value, raw=document.getElementById('stVRaw').checked;
+  stu.busy=true; document.getElementById('stVidGo').disabled=true;
+  const c=stCard('video',{caption:motion}); stStatus('starting on '+model+'…');
+  try{
+    const body={action:'start', prompt:motion, model, duration, resolution, raw, source:'studio_video'};
+    if(stu.base)body.imageUrl=stu.base; else { body.stillPrompt=still; body.stillModel=document.getElementById('stModel').value; }
+    const start=await callFn(VID_URL, body);
+    if(start&&start.id){ if(start.still&&!stu.base){ stu.results.unshift({kind:'photo',url:start.still,prompt:still,model:''}); } await stPoll(c, start.id, {caption:motion,prompt:motion,model:start.model||model,source:'studio_video'}); }
+    else stFailCard(c,'video would not start: '+((start&&(start.error+(start.detail?' · '+String(start.detail).slice(0,140):'')))||'no response'));
+  }catch(e){ stFailCard(c,'request failed'); }
+  stStatus(''); stu.busy=false; document.getElementById('stVidGo').disabled=false;
+}
+async function stExtend(videoUrl){
+  if(stu.busy)return; const desc=prompt('What happens next? (5–10 s extension)','continue the scene naturally, smooth seamless motion'); if(desc===null)return;
+  stu.busy=true; const c=stCard('video',{caption:'extend: '+desc}); stStatus('extending…');
+  try{
+    const start=await callFn(VID_URL,{action:'extend', video:videoUrl, prompt:desc||'continue the scene naturally', duration:6, source:'studio_extend'});
+    if(start&&start.id) await stPoll(c, start.id, {caption:'extend: '+desc,prompt:desc,model:start.model||'',source:'studio_extend'});
+    else stFailCard(c,'extend would not start: '+((start&&(start.error+(start.detail?' · '+String(start.detail).slice(0,140):'')))||'no response'));
+  }catch(e){ stFailCard(c,'request failed'); }
+  stStatus(''); stu.busy=false;
+}
+async function openStudio(){
+  stv.style.display='flex';
+  if(!libLoaded){ try{ await loadLib(true); }catch(e){} }
+  if(!stu.results.length){
+    // pick up where you left off: recent Studio makes from the library
+    const prev=(libItems||[]).filter(it=>/^studio/.test(it.source||'')).slice(0,24);
+    for(const it of prev.reverse()){ const c=stCard(it.kind,{caption:it.alt||it.prompt||''}); stFillCard(c,it.kind,it.url,{caption:it.alt||it.prompt||'',prompt:it.prompt||'',model:it.model||''}); }
+  }
+  stRenderPick();
+}
+function closeStudio(){ stv.style.display='none'; }
+document.getElementById('stClose').onclick=closeStudio;
+document.getElementById('stGen').onclick=stGenerate;
+document.getElementById('stEditGo').onclick=stEditGo;
+document.getElementById('stVidGo').onclick=stVideoGo;
+document.getElementById('lvStudio').onclick=()=>{ closeLibrary(); openStudio(); };
 document.getElementById('jvClose').onclick=()=>{ jv.style.display='none'; };
 
 /* boot */
