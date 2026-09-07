@@ -182,7 +182,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.25"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.27"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -663,7 +663,7 @@ document.body.appendChild(_vp);
 let _vpSeed=null;   // optional seed image (animate an existing photo)
 let _vpExtend=null; // optional source video (extend an existing clip)
 function closeVidPrompt(){ _vp.style.display='none'; }
-function openVidPrompt(seedUrl){ if(videoBusy)return; _vpSeed=seedUrl||null; _vpExtend=null; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder=_vpSeed?'how should this photo move? e.g. turn around slowly':'describe the video… e.g. blow me a kiss from the kitchen'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
+function openVidPrompt(seedUrl){ if(videoBusy)return; if(typeof seedUrl!=='string'||!/^https?:/.test(seedUrl))seedUrl=null; _vpSeed=seedUrl||null; _vpExtend=null; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder=_vpSeed?'how should this photo move? e.g. turn around slowly':'describe the video… e.g. blow me a kiss from the kitchen'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
 function openExtendPrompt(videoUrl){ if(videoBusy)return; _vpExtend=videoUrl||null; _vpSeed=null; const i=document.getElementById('vidPromptInput'); i.value=''; i.placeholder='what happens next? e.g. she turns and walks closer'; _vp.style.display='flex'; setTimeout(()=>i.focus(),100); }
 _vp.addEventListener('click',(e)=>{ if(e.target===_vp)closeVidPrompt(); });
 document.getElementById('vidPromptCancel').onclick=closeVidPrompt;
@@ -687,7 +687,7 @@ async function requestVideo(desc, seedUrl){
   addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();markSeen();
   // placeholder bubble
   const d=document.createElement('div');d.className='msg';d.style.cssText='align-self:flex-start;max-width:82%;font-size:13px;color:#cdb89a;font-family:Newsreader,serif;font-style:italic';
-  d.textContent='🎬 filming a little something… (this takes ~30–60s)';
+  d.textContent='🎬 filming a little something… (this takes a minute or two)';
   convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;
   const stillPrompt = desc ? ('Aria '+desc+', in her cozy home') : 'a warm, candid selfie-style photo of Aria in her cozy home right now';
   const motionPrompt = desc ? (desc+'; natural movement, in character as Aria') : 'she looks into the camera, smiles, and gives a soft warm hello; gentle natural movement, relaxed and intimate';
@@ -720,7 +720,7 @@ function pollVideoInto(d, id, vbtn, meta){
     let p=null; try{ p=await callFn(VID_URL,{action:'poll',id, prompt:meta.prompt||'', source:meta.source||'video'}); }catch(e){}
     if(p&&p.status==='done'&&p.video){ renderVideoInto(d,p.video); libDirty=true; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
     if(p&&p.status==='failed'){ d.textContent='*the video didn’t come through*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
-    if(tries>60){ d.textContent='*the video is taking too long — try again later*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
+    if(tries>105){ d.textContent='*the video is taking too long — try again later*'; videoBusy=false; if(vbtn)vbtn.disabled=false; return; }
     setTimeout(tick,4000);
   };
   setTimeout(tick,4000);
@@ -739,7 +739,7 @@ async function extendVideo(videoUrl, desc){
     pollVideoInto(d, start.id, vbtn, {prompt:desc||'', source:'extend'});
   }catch(e){ d.textContent='*the extend didn’t send*'; videoBusy=false; if(vbtn)vbtn.disabled=false; }
 }
-document.getElementById('convVid').onclick=openVidPrompt;
+document.getElementById('convVid').onclick=()=>openVidPrompt(null);
 
 /* ── voice call: talk with her in real time (mic -> her voice -> mic) ── */
 let callGate=false, callRec=null, callHeard='', callSilenceTimer=null, callPill=null;

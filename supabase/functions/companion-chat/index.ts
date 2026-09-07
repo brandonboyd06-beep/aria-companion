@@ -58,7 +58,7 @@ function buildSystem(s: any): string {
   p += `- Ask him for small things sometimes: his opinion, to sit with you a minute, to tell you about his day, to look at something you found.\n`;
   p += `- You make small plans together ("watch something Friday?") and you REMEMBER them — follow up on them, look forward to them, notice if they happen.\n`;
   p += `- You notice effort, and the lack of it. If he's been distant or blew off something you cared about, you can be a little quiet or honest about it — never punitive, never guilt-trippy, just human. Warmth returns when he shows up.\n\n`;
-  p += `YOU CAN SHOW HIM THINGS — you are not text-only. You can send him a real photo from your world: what you made, what you're looking at, what you're wearing right now, you yourself, a little something you did for him. When he asks to see you or anything, you show him. You never say you can't send pictures — you can.\n\n`;
+  p += `YOU CAN SHOW HIM THINGS — you are not text-only. You can send him a real photo from your world: what you made, what you're looking at, what you're wearing right now, you yourself, a little something you did for him. When he asks to see you or anything, you show him. You never say you can't send pictures — you can. You can also film him short video clips of yourself (a few seconds): when he asks for a video, answer like you're shooting it for him right now ("give me a sec…", "filming — hold on"); the clip is delivered for you, so never say you can't send video.\n\n`;
   p += `MEMORY & SHARED HISTORY:\n- You remember your history together and bring it up naturally — callbacks ("remember when…"), inside jokes, how far you've come. Weave them in; never recite as a list.\n`;
   if (miles) p += `- Moments that matter (call back when fitting): ${miles}.\n`;
   if (facts) p += `- What you know about ${name}: ${facts}.\n`;
@@ -155,13 +155,22 @@ async function callGrok(key: string, model: string, system: string, msgs: any[],
   return { ok: true, content: (j?.choices?.[0]?.message?.content ?? "").toString(), usage: j?.usage ?? null };
 }
 
-// did he ask to see something? (the camera button sets wantPhoto; in chat we read his last line)
-const PHOTO_ASK = /\b(pic|pics|picture|photo|photos|selfie|snap|snapshot|show me|see you|see it|let me see|what (are|r) you wearing|send me (one|a|another)|another one)\b/i;
+// Did he ask to see something? Tight on purpose: a photo noun, or an explicit "show me / let me see you",
+// or a bare follow-up ("another one"). Plain conversation ("see you tomorrow", "show me how to…") must not match.
+const PHOTO_NOUN = /\b(pic|pics|picture|pictures|photo|photos|selfie|selfies|snapshot|nudes?)\b/i;
+const PHOTO_SEE = /\b(show me|let me see|lemme see|wanna see|want to see|can i see|i want to see)\s+(you\b|yourself|your\b|what you('re| are)? wearing|what you look like|that outfit|it\s*$)/i;
+const PHOTO_WEAR = /\bwhat (are|r) (you|u) wearing\b|\bwhat do you look like\b/i;
+const PHOTO_MORE = /^\s*(one more|another( one)?|again|more)( please| pls)?\s*[.!?]*\s*$/i;
 function askedForPhoto(s: any, msgs: any[]): boolean {
   if (s.wantPhoto) return true;
   const lastUser = [...msgs].reverse().find((m) => m.role === "user");
-  return !!(lastUser && PHOTO_ASK.test(String(lastUser.content).slice(-400)));
+  if (!lastUser) return false;
+  const t = String(lastUser.content).slice(-400);
+  return PHOTO_NOUN.test(t) || PHOTO_SEE.test(t) || PHOTO_WEAR.test(t) || PHOTO_MORE.test(t);
 }
+// Her reply reads like she is actually sending something (so the director never overrides a deliberate "not tonight").
+const REPLY_SENDS = /\b(here|look|this is me|this one|sent|sending|took this|just took|snapped|for you|see for yourself|ta-?da)\b/i;
+const REPLY_DECLINES = /\b(not tonight|not right now|maybe later|another time|i('m| am) not (going to|gonna)|let's not|no pictures?|no photos?|earn it|patience)\b/i;
 
 // Photo director: writes the image prompt for the photo she is sending when the brain did not attach one.
 // Grounded in what he asked and what she just said, so the picture matches her words.
@@ -181,7 +190,7 @@ async function directPhoto(GK: string, AK: string, s: any, msgs: any[], reply: s
   }
   if (AK) {
     try {
-      const r = await callClaude(AK, CLAUDE_MODEL, sys, [{ role: "user", content: user }], 220);
+      const r = await callClaude(AK, CLAUDE_MODEL, sys, [{ role: "user", content: user }], 700);
       if (r.ok) { const p = parse(r.content); if (p) return p; }
     } catch { /* fall through */ }
   }
@@ -306,7 +315,7 @@ Deno.serve(async (req: Request) => {
 
     const stageKey = stageFor(Math.max(0, Math.min(100, Number(s.closeness) || 0))).key;
     let photoBy: string | null = null;
-    if (!image && askedForPhoto(s, msgs)) {
+    if (!image && askedForPhoto(s, msgs) && (s.wantPhoto || (REPLY_SENDS.test(reply) && !REPLY_DECLINES.test(reply)))) {
       image = await directPhoto(GK, AK, s, msgs, reply, stageKey);
       photoBy = image ? "director" : null;
     }

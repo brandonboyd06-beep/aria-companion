@@ -7,7 +7,38 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const ATLAS = "https://api.atlascloud.ai/api/v1";
-const MODEL = "bytedance/seedance-v1.5-pro/image-to-video-spicy";
+// 2026-09-07: AtlasCloud removed every "spicy" video id (wan-2.6-spicy, seedance spicy, wan-2.2-spicy extend).
+// Verified replacements: open Wan 2.2 (self-hosted by AtlasCloud) animates her lingerie stills without
+// sanitizing (~2 min, 960x960), and Wan 2.5 video-extend continues them (~2 min, 1440x1440).
+const MODEL = "atlascloud/wan-2.2/image-to-video";
+const EXTEND_MODEL = "alibaba/wan-2.5/video-extend";
+const EXTEND_FALLBACK = "pixverse/v6/video-extend";
+const NEGATIVE = "cartoon, anime, illustration, 3d render, deformed, extra fingers, blurry, text, watermark";
+
+// build the submit payload for whichever family the model belongs to
+function startPayload(model: string, still: string, motion: string, b: any): any {
+  const dur = Number(b.duration) || 5;
+  if (/^atlascloud\/wan-2\.2/i.test(model)) {
+    return { model, image: still, prompt: motion, negative_prompt: NEGATIVE, resolution: b.resolution || "720p", duration: Math.max(3, Math.min(10, dur)), seed: -1 };
+  }
+  if (/^xai\//i.test(model)) {
+    return { model, image_url: still, prompt: motion, duration: Math.max(1, Math.min(15, dur)), resolution: b.resolution || "720p" };
+  }
+  if (/wan/i.test(model)) {
+    const d = [5, 10, 15].includes(dur) ? dur : 5;
+    return { model, image: still, prompt: motion, negative_prompt: NEGATIVE, duration: d, resolution: b.resolution || "720p", generate_audio: b.audio !== false, shot_type: b.shot || "single", seed: -1 };
+  }
+  return { model, image: still, prompt: motion, duration: Math.max(4, Math.min(12, dur)), resolution: b.resolution || "720p", generate_audio: b.audio !== false, aspect_ratio: b.aspect || "9:16", camera_fixed: false, seed: -1 };
+}
+async function submit(key: string, payload: any): Promise<{ ok: boolean; status: number; id?: string; detail?: string }> {
+  const r = await fetch(`${ATLAS}/model/generateVideo`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(payload) });
+  const txt = await r.text();
+  let j: any; try { j = JSON.parse(txt); } catch { j = null; }
+  if (!r.ok || !j) return { ok: false, status: r.status, detail: txt.slice(0, 500) };
+  const id = j?.data?.id;
+  if (!id) return { ok: false, status: r.status, detail: JSON.stringify(j).slice(0, 400) };
+  return { ok: true, status: r.status, id };
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -66,20 +97,20 @@ Deno.serve(async (req: Request) => {
   if (action === "extend") {
     const video = (b.video || "").toString();
     if (!video || !/^https?:/.test(video)) return out({ error: "no_video" }, 400);
-    let xmodel = "alibaba/wan-2.2-spicy/video-extend";
+    let xmodel = EXTEND_MODEL;
     try { const sb3 = createClient(SUPA, SRK); const { data } = await sb3.from("companion_config").select("value").eq("key", "video_extend").maybeSingle(); if (data?.value?.model) xmodel = String(data.value.model); } catch { /* default */ }
     if (b.model) xmodel = String(b.model);
     const xprompt = (b.prompt || "continue the scene naturally, smooth seamless motion").toString().slice(0, 1400);
-    // video-extend takes a minimal payload (rejects generate_audio / seed / etc.)
-    const payload: any = { model: xmodel, video, prompt: xprompt, duration: Math.max(4, Math.min(15, Number(b.duration) || 5)) };
+    // video-extend takes a minimal payload (rejects generate_audio / seed / etc.); Wan 2.5 wants 5-10 s
+    const dur = Math.max(5, Math.min(10, Number(b.duration) || 5));
     try {
-      const r = await fetch(`${ATLAS}/model/generateVideo`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(payload) });
-      const txt = await r.text();
-      let j: any; try { j = JSON.parse(txt); } catch { j = null; }
-      if (!r.ok || !j) return out({ error: "upstream", status: r.status, detail: txt.slice(0, 500) }, 502);
-      const id = j?.data?.id;
-      if (!id) return out({ error: "no_id", detail: JSON.stringify(j).slice(0, 400) }, 502);
-      return out({ id, status: "processing" });
+      let res = await submit(key, { model: xmodel, video, prompt: xprompt, duration: dur });
+      if (!res.ok && xmodel !== EXTEND_FALLBACK && (res.status === 400 || res.status === 404)) {
+        const res2 = await submit(key, { model: EXTEND_FALLBACK, video, prompt: xprompt, duration: dur });
+        if (res2.ok) { res = res2; xmodel = EXTEND_FALLBACK; }
+      }
+      if (!res.ok) return out({ error: "upstream", status: res.status, detail: res.detail }, 502);
+      return out({ id: res.id, status: "processing", model: xmodel });
     } catch (e) { return out({ error: "fetch_failed", detail: String(e) }, 500); }
   }
 
@@ -87,7 +118,7 @@ Deno.serve(async (req: Request) => {
   const baseMotion = (b.prompt || "a short, warm clip with gentle natural movement and a soft smile").toString().slice(0, 1400);
   // keep the video photorealistic and consistent with the source still
   const motion = `${baseMotion}. Keep a photorealistic, lifelike look consistent with the source photo; natural realistic movement, not a cartoon or animation.`;
-  let still = b.imageUrl ? String(b.imageUrl) : "";
+  let still = (typeof b.imageUrl === "string" && /^https?:\/\//.test(b.imageUrl)) ? b.imageUrl : "";
   if (!still) {
     const sp = (b.stillPrompt || "a selfie of Aria smiling softly at the camera in her cozy home").toString().slice(0, 400);
     try {
@@ -101,26 +132,14 @@ Deno.serve(async (req: Request) => {
   let model = MODEL;
   try { const sb2 = createClient(SUPA, SRK); const { data } = await sb2.from("companion_config").select("value").eq("key", "video").maybeSingle(); if (data?.value?.model) model = String(data.value.model); } catch { /* default */ }
   if (b.model) model = String(b.model);
-  const isWan = /wan/i.test(model);
-
-  const payload: any = {
-    model,
-    image: still,
-    prompt: motion,
-    duration: Math.max(4, Math.min(15, Number(b.duration) || 5)),
-    resolution: b.resolution || "720p",
-    generate_audio: b.audio !== false,
-    seed: -1,
-  };
-  if (isWan) { payload.shot_type = b.shot || "single"; }
-  else { payload.aspect_ratio = b.aspect || "9:16"; payload.camera_fixed = false; payload.duration = Math.min(12, payload.duration); }
   try {
-    const r = await fetch(`${ATLAS}/model/generateVideo`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(payload) });
-    const txt = await r.text();
-    let j: any; try { j = JSON.parse(txt); } catch { j = null; }
-    if (!r.ok || !j) return out({ error: "upstream", status: r.status, detail: txt.slice(0, 400) }, 502);
-    const id = j?.data?.id;
-    if (!id) return out({ error: "no_id", detail: JSON.stringify(j).slice(0, 300) }, 502);
-    return out({ id, still, status: "processing" });
+    let res = await submit(key, startPayload(model, still, motion, b));
+    if (!res.ok && model !== MODEL && (res.status === 400 || res.status === 404)) {
+      // the configured model no longer exists upstream → fall back to the verified default
+      const res2 = await submit(key, startPayload(MODEL, still, motion, b));
+      if (res2.ok) { res = res2; model = MODEL; }
+    }
+    if (!res.ok) return out({ error: "upstream", status: res.status, detail: res.detail }, 502);
+    return out({ id: res.id, still, status: "processing", model });
   } catch (e) { return out({ error: "fetch_failed", detail: String(e) }, 500); }
 });
