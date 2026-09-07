@@ -204,6 +204,7 @@ addEventListener('touchmove',(e)=>{const t=e.touches[0]; if(t){px=(t.clientX/inn
 
 function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open('aria-avatar',1); r.onupgradeneeded=()=>r.result.createObjectStore('kv'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 async function idbGet(k){ try{ const d=await idb(); return await new Promise((res,rej)=>{ const g=d.transaction('kv','readonly').objectStore('kv').get(k); g.onsuccess=()=>res(g.result); g.onerror=()=>rej(g.error); }); }catch(e){ return null; } }
+async function idbPut(k,v){ const d=await idb(); return new Promise((res,rej)=>{ const t=d.transaction('kv','readwrite'); t.objectStore('kv').put(v,k); t.oncomplete=res; t.onerror=()=>rej(t.error); }); }
 
 function bone(n){
   if(!rig)return null;
@@ -256,11 +257,22 @@ async function init(){
   scene.add(new THREE.AmbientLight(0x604a3a,0.7));
   addEventListener('resize',()=>{ if(!renderer)return; camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
   clock=new THREE.Clock();
-  // her look: the avatar created on /avatar.html (shared storage) or the bundled fallback
-  const blob=await idbGet('avatar');
-  const urls=blob?[URL.createObjectURL(blob)]:['./vendor/models/twist.vrm'];
+  // her look: the avatar created on /avatar.html — this device's copy, else the account's cloud copy — else the bundled REALISTIC rig
+  let blob=await idbGet('avatar');
+  if(!blob){
+    try{
+      // the app's SUPA/CLIENT_ID consts live inside its IIFE, so read the account id from storage directly
+      const acct=localStorage.getItem('aria.account_id')||localStorage.getItem('aria.client_id')||'';
+      if(acct){
+        const r=await fetch('https://mymunodjaxymhbnhjwjx.supabase.co/storage/v1/object/public/aria-avatars/'+encodeURIComponent(acct)+'.glb?v='+Date.now(),{cache:'no-store'});
+        if(r.ok){ const b=await r.blob(); if(b.size>1000){ blob=b; try{ await idbPut('avatar', b); }catch(e){} } }
+      }
+    }catch(e){}
+  }
+  // no saved look → NO stand-in rig (never the anime one). The room scene stays and a small hint offers to create her face.
+  if(!blob){ noLook(); return; }
   const loader=new GLTFLoader(); loader.register((p)=>new VRMLoaderPlugin(p));
-  for(const url of urls.concat(['./vendor/models/twist.vrm'])){
+  for(const url of [URL.createObjectURL(blob)]){
     try{
       const gltf=await loader.loadAsync(url);
       const v=gltf.userData.vrm;
@@ -277,8 +289,22 @@ async function init(){
       break;
     }catch(e){ console.log('[avatar] load failed',url); }
   }
+  if(!rig){ noLook(); return; }
+  stage.style.display=visible?'block':'none';
   applyMood();
   animate();
+}
+function noLook(){
+  rig=null;
+  const st=document.getElementById('avatarStage'); if(st)st.style.display='none';
+  let h=document.getElementById('lookHint');
+  if(!h){
+    h=document.createElement('a'); h.id='lookHint'; h.href='./avatar.html';
+    h.textContent='✨ give her a face';
+    h.style.cssText='position:fixed;top:calc(max(16px,env(safe-area-inset-top)) + 46px);left:50%;transform:translateX(-50%);z-index:31;padding:7px 14px;border-radius:999px;border:1px solid rgba(232,184,138,.35);background:rgba(20,16,18,.6);backdrop-filter:blur(6px);color:#e8c6a3;font-family:Inter,sans-serif;font-size:12px;text-decoration:none;letter-spacing:.02em';
+    document.body.appendChild(h);
+  }
+  h.style.display=visible?'block':'none';
 }
 function animate(){
   requestAnimationFrame(animate);
@@ -303,8 +329,9 @@ function animate(){
   renderer.render(scene,camera);
 }
 window.AriaAvatar={
-  show(){ visible=true; document.getElementById('avatarStage').style.display='block'; init(); },
-  hide(){ visible=false; const st=document.getElementById('avatarStage'); if(st)st.style.display='none'; this.stopTalking(); },
+  show(){ visible=true; if(rig)document.getElementById('avatarStage').style.display='block'; else if(inited)noLook(); init(); },
+  hide(){ visible=false; const st=document.getElementById('avatarStage'); if(st)st.style.display='none'; const h=document.getElementById('lookHint'); if(h)h.style.display='none'; this.stopTalking(); },
+  hasLook(){ return !!rig; },
   visible(){ return visible; },
   setMood(m){ if(MOODS[m]!==undefined){ mood=m; applyMood(); } },
   setMoodForScene(k){ const m=SCENE_MOOD[k]; if(m)this.setMood(m); },
@@ -322,7 +349,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-07-09.19"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-07.20"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -653,7 +680,7 @@ async function sendPhoto(prompt,alt){
       im.style.cssText='display:block;width:240px;max-width:78vw;height:auto;border-radius:14px;border:1px solid rgba(232,184,138,.35);cursor:zoom-in';
       im.onclick=()=>openLightbox(j.image);
       im.onload=()=>{console.log('[aria photo] loaded',im.naturalWidth+'x'+im.naturalHeight);convChat.scrollTop=convChat.scrollHeight;};
-      im.onerror=()=>{ dbg('img tag failed to load. '+info+' src='+String(j.image).slice(0,80)); console.log('[aria photo] IMG ERROR',j.image); };
+      im.onerror=()=>{ dbg('the photo didn’t come through — tap 📷 to try again'); console.log('[aria photo] IMG ERROR',info,j.image); };
       im.src=j.image;
       d.appendChild(im);
       if(alt){const c=document.createElement('div');c.style.cssText='font-family:Newsreader,serif;font-style:italic;font-size:13px;color:#cdb89a;margin-top:4px';c.textContent=alt;d.appendChild(c);}

@@ -71,11 +71,29 @@ else { try{ if(!qs.get('m')) GLB_URL=localStorage.getItem('aria.avatar.glb')||''
 if(qs.get('reset')==='1'){ GLB_URL=''; try{localStorage.removeItem('aria.avatar.glb');}catch(e){} }
 const pick=qs.get('m');
 const ARM_OVERRIDE=parseFloat(qs.get('arms')||'');
+// default is the REALISTIC rig (never the anime one); the vrm list is only a last resort if the glb fails to load
 const MODEL_URLS=GLB_URL?[normalizeGlbUrl(GLB_URL)]:(pick?["./vendor/models/"+pick+".vrm"]:[
-  "./vendor/models/twist.vrm",
-  "./vendor/models/alicia.vrm",
-  "./vendor/models/seed.vrm"
+  "./vendor/models/avaturn_demo.glb",
+  "./vendor/models/twist.vrm"
 ]);
+// her look follows the ACCOUNT (same id the app uses), so it survives Safari vs home-screen app vs another phone
+let ACCOUNT_ID=''; try{ ACCOUNT_ID=localStorage.getItem('aria.account_id')||localStorage.getItem('aria.client_id')||''; }catch(e){}
+const CLOUD_AVATAR=ACCOUNT_ID?(SUPA+'/storage/v1/object/public/aria-avatars/'+encodeURIComponent(ACCOUNT_ID)+'.glb'):'';
+async function cloudPutAvatar(blob){
+  if(!ACCOUNT_ID)return false;
+  try{
+    const r=await fetch(SUPA+'/storage/v1/object/aria-avatars/'+encodeURIComponent(ACCOUNT_ID)+'.glb',{method:'POST',headers:{'apikey':ANON,'Authorization':'Bearer '+ANON,'x-upsert':'true','Content-Type':'model/gltf-binary'},body:blob});
+    return r.ok;
+  }catch(e){ return false; }
+}
+async function cloudGetAvatar(){
+  if(!CLOUD_AVATAR)return null;
+  try{ const r=await fetch(CLOUD_AVATAR+'?v='+Date.now(),{cache:'no-store'}); if(!r.ok)return null; const b=await r.blob(); return b.size>1000?b:null; }catch(e){ return null; }
+}
+async function cloudDelAvatar(){
+  if(!ACCOUNT_ID)return;
+  try{ await fetch(SUPA+'/storage/v1/object/aria-avatars/'+encodeURIComponent(ACCOUNT_ID)+'.glb',{method:'DELETE',headers:{'apikey':ANON,'Authorization':'Bearer '+ANON}}); }catch(e){}
+}
 
 const statusEl=document.getElementById('status');
 const setStatus=(t)=>{statusEl.textContent=t;};
@@ -176,10 +194,13 @@ async function applyExport(data){
     const u=(data&&(data.url||data.avatarUrl))||'';
     if(!u)throw new Error('no url');
     const resp=await fetch(u); const blob=await resp.blob();
+    if(!blob||blob.size<1000)throw new Error('empty export');
     try{ await idbPut('avatar', blob); }catch(e){}
     await loadModel([URL.createObjectURL(blob)]);
     applyMood();
-    setStatus('that’s her now — saved on this device');
+    setStatus('that’s her now — saving to your account…');
+    const synced=await cloudPutAvatar(blob);
+    setStatus(synced?'that’s her now — saved to your account (every device)':'that’s her now — saved on this device (account sync failed)');
   }catch(e){ setStatus('couldn’t load her new look'); }
 }
 function openCreator(){
@@ -365,12 +386,22 @@ function animate(){
 }
 (async ()=>{
   let urls=MODEL_URLS;
-  if(qs.get('reset')==='1'){ try{await idbDel('avatar');}catch(e){} }
+  if(qs.get('reset')==='1'){ try{await idbDel('avatar');}catch(e){} await cloudDelAvatar(); }
   else if(!qs.get('glb') && !pick){
-    try{ const b=await idbGet('avatar'); if(b) urls=[URL.createObjectURL(b)]; }catch(e){}
+    let b=null;
+    try{ b=await idbGet('avatar'); }catch(e){}
+    if(!b){ b=await cloudGetAvatar(); if(b){ try{ await idbPut('avatar', b); }catch(e){} } }
+    else if(CLOUD_AVATAR){
+      // a look exported before account sync existed: push this device's copy up once so every device gets her
+      fetch(CLOUD_AVATAR+'?v='+Date.now(),{method:'HEAD',cache:'no-store'}).then((r)=>{ if(!r.ok) cloudPutAvatar(b); }).catch(()=>{});
+    }
+    if(b) urls=[URL.createObjectURL(b)];
+    else window.__noLook=true;
   }
   await loadModel(urls);
   applyMood();
+  // nothing saved for this account yet → go straight to creating her (the stand-in is only a placeholder)
+  if(window.__noLook){ setStatus('she has no face yet — create her look'); openCreator(); }
 })();
 animate();
 </script>
