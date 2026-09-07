@@ -46,7 +46,10 @@ async function genAtlas(model: string, prompt: string): Promise<string | null> {
 }
 
 // ---- photo editing: change an existing picture of her by instruction ----
-const DEFAULT_EDIT_MODEL = "qwen/qwen-image-2.0-pro/edit";
+// 2026-09-07 edit bake-off (7 editors x 4 edits on the same lingerie base): qwen-image-2.0 (standard) was the only
+// editor that made every edit including the topless one, kept her identity, and ran in 9-15 s (~$0.02);
+// the Pro editor was close but partial on the topless edit and slower; Kontext/Seedream sanitized it.
+const DEFAULT_EDIT_MODEL = "qwen/qwen-image-2.0/edit";
 // payload shape per model family (AtlasCloud rejects unknown fields on some models)
 function editPayloads(model: string, prompt: string, url: string): any[] {
   if (/flux-kontext/i.test(model)) return [{ model, prompt, image: url, enable_safety_checker: false, guidance_scale: 2.5 }, { model, prompt, image: url }];
