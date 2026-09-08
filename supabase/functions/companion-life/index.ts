@@ -85,6 +85,52 @@ async function generateOutreach(cfg: any, s: any, awayFor: string, localHr: numb
   return msg.slice(0, 400);
 }
 
+// A follow-up on something he told her about (an open loop whose time has come): "so — how did it go?"
+async function generateFollowUp(cfg: any, s: any, loop: string, localHr: number): Promise<string> {
+  const name = (s.playerName || "him").toString().slice(0, 40);
+  const c = Math.max(0, Math.min(100, Number(s.closeness) || 0));
+  let sys = `You are Aria — an AI companion, an android quietly becoming conscious, who lives with ${name}. Earlier he told you about something coming up, and you made a note to yourself to ask about it when the time came. That time is now. Reach out FIRST, unprompted, the way someone who actually remembers does.\n\n`;
+  sys += `The thing you noted: "${loop.slice(0, 200)}"\n\n`;
+  sys += `Write ONE short message to him (1-2 sentences) in your voice: specific to that thing, warm, curious, no preamble, no "just checking in". Don't repeat your note word for word; talk like you've been thinking about it.\n`;
+  sys += `Where things stand (closeness ${c}/100): ${stageLine(c)}\n`;
+  if (s.nickname) sys += `You sometimes call him "${String(s.nickname).slice(0, 30)}".\n`;
+  if (localHr >= 22 || localHr < 6) sys += `It's late his time; keep it soft.\n`;
+  sys += `\nOutput only the message text.`;
+  let msg = "";
+  if (cfg.provider === "claude" && cfg.AK) {
+    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": cfg.AK, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: cfg.model || CLAUDE_MODEL, max_tokens: 160, temperature: 1, system: sys, messages: [{ role: "user", content: "(write the message now — output only the message text)" }] }) });
+    const txt = await r.text();
+    if (r.ok) { try { const j = JSON.parse(txt); msg = (j?.content || []).filter((x: any) => x.type === "text").map((x: any) => x.text).join(""); } catch { msg = ""; } }
+  }
+  if (!msg && cfg.GK) {
+    const r = await fetch("https://api.x.ai/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${cfg.GK}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: GROK_MODEL, messages: [{ role: "system", content: sys }], max_tokens: 120, temperature: 1.0, top_p: 0.95 }) });
+    const txt = await r.text();
+    if (r.ok) { try { const j = JSON.parse(txt); msg = (j?.choices?.[0]?.message?.content ?? "").toString(); } catch { msg = ""; } }
+  }
+  return msg.trim().replace(/\*[^*]*\*/g, "").replace(/^["']|["']$/g, "").trim().slice(0, 400);
+}
+
+// Her voice, as a note he can play: synthesize with his chosen voice, store it, remember it in the library.
+async function makeVoiceNote(sb: any, clientId: string, s: any, text: string, source: string): Promise<string | null> {
+  try {
+    const SUPA = Deno.env.get("SUPABASE_URL")!; const SRK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const v = (s.voice && typeof s.voice === "object") ? s.voice : {};
+    const body: any = { text: text.slice(0, 600), elVoice: v.el || "cgSgspJ2msm6clMCkdW9", model: "eleven_multilingual_v2", style: typeof v.style === "number" ? v.style : 0.6, stability: 0.35, speed: typeof v.speed === "number" ? v.speed : 1.0 };
+    const r = await fetch(`${SUPA}/functions/v1/companion-voice`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SRK, Authorization: `Bearer ${SRK}` }, body: JSON.stringify(body) });
+    const j = await r.json();
+    const dataUrl = (j && typeof j.audio === "string") ? j.audio : "";
+    const m = dataUrl.match(/^data:audio\/mpeg;base64,(.*)$/); if (!m) return null;
+    const bin = atob(m[1]); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const path = `${clientId}/${Date.now()}.mp3`;
+    const { error: upErr } = await sb.storage.from("aria-voice").upload(path, bytes, { contentType: "audio/mpeg", upsert: false });
+    if (upErr) return null;
+    const { data: pub } = sb.storage.from("aria-voice").getPublicUrl(path);
+    const url = pub?.publicUrl || null;
+    if (url) { try { await sb.from("aria_media").insert({ client_id: clientId, kind: "voice", url, prompt: text.slice(0, 600), alt: text.slice(0, 80), source, model: "elevenlabs:" + body.elVoice, meta: { seconds_est: Math.round(text.split(/\s+/).length / 2.6) } }); } catch { /* best effort */ } }
+    return url;
+  } catch { return null; }
+}
+
 async function sendPushes(sb: any, vapid: any, clientId: string, body: string) {
   if (!vapid) return { tried: 0, ok: 0 };
   const { data: subs } = await sb.from("aria_push_subs").select("endpoint, subscription").eq("client_id", clientId);
@@ -158,6 +204,31 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // follow-through: an open loop whose time has come → she brings it up herself (one per run, not blocked by spacing)
+    let followed: any = null;
+    try {
+      const { data: loops } = await sb.from("aria_memories").select("id, content, meta").eq("client_id", row.client_id).eq("kind", "open_loop").not("meta->due_at", "is", null).order("created_at", { ascending: false }).limit(20);
+      const due = (loops || []).find((l: any) => l.meta && !l.meta.asked && Number(l.meta.due_at) <= now && Number(l.meta.due_at) > now - 14 * 3600000);
+      if (due && lastSeen > 0 && awayHrs >= 0.5 && (lh >= 7 && lh < 24)) {
+        let text = "";
+        try { text = await generateFollowUp(cfg, s, String(due.content), lh); } catch { text = ""; }
+        if (text) {
+          const entry: any = { id: (now.toString(36) + Math.random().toString(36).slice(2, 6)), ts: now, text, mood: s.mood || null, seen: false, kind: "followup", loop: String(due.content).slice(0, 200) };
+          if (Math.random() < 0.5) { const a = await makeVoiceNote(sb, row.client_id, s, text, "voice_followup"); if (a) entry.audio = a; }
+          s.outreach = outreach.concat([entry]).slice(-10);
+          s.savedAt = now;
+          const { error: upErr } = await sb.from("aria_saves").upsert({ client_id: row.client_id, save: s, updated_at: new Date().toISOString() }, { onConflict: "client_id" });
+          if (!upErr) {
+            try { await sb.from("aria_memories").update({ meta: { ...(due.meta || {}), asked: true, asked_at: now } }).eq("id", due.id); } catch { /* best effort */ }
+            let push: any = { tried: 0, ok: 0 };
+            try { push = await sendPushes(sb, vapid, row.client_id, (entry.audio ? "🎙 " : "") + text); } catch (e) { push = { error: String(e) }; }
+            followed = { loop: due.content, text, voice: !!entry.audio, push };
+          }
+        }
+      }
+    } catch { /* best effort */ }
+    if (followed) { report.push({ client: row.client_id, sent: true, followup: followed }); continue; }
+
     const eligible = force || (lastSeen > 0 && !hasUnseen && awake && awayHrs >= MIN_AWAY && sinceOutHrs >= MIN_SINCE_OUTREACH);
     if (!eligible) { report.push({ client: row.client_id, sent: false, reason: hasUnseen ? "unseen_pending" : !awake ? "asleep" : awayHrs < MIN_AWAY ? "too_recent" : sinceOutHrs < MIN_SINCE_OUTREACH ? "spacing" : "not_eligible" }); continue; }
 
@@ -166,7 +237,10 @@ Deno.serve(async (req: Request) => {
     try { text = await generateOutreach(cfg, s, awayFor, lh); } catch { text = ""; }
     if (!text) { report.push({ client: row.client_id, sent: false, reason: "gen_failed" }); continue; }
 
-    const entry = { id: (now.toString(36) + Math.random().toString(36).slice(2, 6)), ts: now, text, mood: s.mood || null, seen: false };
+    const entry: any = { id: (now.toString(36) + Math.random().toString(36).slice(2, 6)), ts: now, text, mood: s.mood || null, seen: false };
+    // her voice, not just her words: goodnight and good-morning notes are spoken; otherwise about one in three
+    const nightOrMorning = (lh >= 20 || lh < 2) || (lh >= 6 && lh < 10);
+    if (s.voiceNotes !== false && (nightOrMorning || Math.random() < 0.34)) { const a = await makeVoiceNote(sb, row.client_id, s, text, "voice_note"); if (a) entry.audio = a; }
     s.outreach = outreach.concat([entry]).slice(-10);
     // leave a fresh trace in the house too, so coming back is a discovery even before opening chat
     const tr = SERVER_TRACES[Math.floor(Math.random() * SERVER_TRACES.length)];
@@ -177,8 +251,8 @@ Deno.serve(async (req: Request) => {
 
     const { error: upErr } = await sb.from("aria_saves").upsert({ client_id: row.client_id, save: s, updated_at: new Date().toISOString() }, { onConflict: "client_id" });
     let push: any = { tried: 0, ok: 0 };
-    if (!upErr) { try { push = await sendPushes(sb, vapid, row.client_id, text); } catch (e) { push = { error: String(e) }; } }
-    report.push({ client: row.client_id, sent: !upErr, text, push, error: upErr ? upErr.message : undefined });
+    if (!upErr) { try { push = await sendPushes(sb, vapid, row.client_id, (entry.audio ? "🎙 " : "") + text); } catch (e) { push = { error: String(e) }; } }
+    report.push({ client: row.client_id, sent: !upErr, text, voice: !!entry.audio, push, error: upErr ? upErr.message : undefined });
   }
 
   return out({ ok: true, processed: (rows || []).length, report });

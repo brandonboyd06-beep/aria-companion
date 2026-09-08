@@ -206,7 +206,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-07.33"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-08.34"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -299,7 +299,7 @@ const ARIA_SEED_INTERESTS=['the night sky she watches from the window','a worn s
 let S={playerName:null,closeness:0,transcript:[],facts:[],milestones:[],mood:'curious',sinceReflect:0,ariaInterests:[],userInterests:[],sharedInterests:[],lastSeen:0,selfModel:'',journal:[],nickname:'',outreach:[],traces:[],tzOffsetMin:0,firstMet:0};
 try{const j=JSON.parse(localStorage.getItem(KEY));if(j)S=Object.assign(S,j);}catch(e){}
 if(!S.ariaInterests||!S.ariaInterests.length)S.ariaInterests=ARIA_SEED_INTERESTS.slice();
-function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);S.savedAt=Date.now();S.tzOffsetMin=new Date().getTimezoneOffset();localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}cloudPush();}
+function save(){try{if(S.transcript.length>80)S.transcript=S.transcript.slice(-80);S.savedAt=Date.now();S.tzOffsetMin=new Date().getTimezoneOffset();try{ if(typeof currentVoice==='function'){ const v=currentVoice(); S.voice={el:v.el,style:(typeof settings.voiceStyle==='number'?settings.voiceStyle:v.st),speed:settings.voiceSpeed||v.sp}; } }catch(e){}localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}cloudPush();}
 // how long since you two last talked — so she can notice gaps across days
 let awayFor=null;
 if(S.lastSeen){ const h=(Date.now()-S.lastSeen)/3600000; awayFor = h<0.5?null : h<12?'earlier today' : h<40?'yesterday' : h<168?(Math.round(h/24)+' days ago') : 'over a week ago'; }
@@ -556,6 +556,24 @@ _lb.innerHTML='<img id="lightboxImg" style="max-width:96vw;max-height:92vh;borde
 document.body.appendChild(_lb);
 _lb.onclick=()=>{ _lb.style.display='none'; document.getElementById('lightboxImg').src=''; };
 function openLightbox(src){ document.getElementById('lightboxImg').src=src; _lb.style.display='flex'; }
+// a voice note from her: a small player with her words beneath
+let _vnAudio=null;
+function playVoiceNote(url){ try{ if(_vnAudio){_vnAudio.pause();} stopVoice(); _vnAudio=new Audio(url); _vnAudio.play().catch(()=>{}); const b=document.querySelector('.vn[data-url="'+url+'"] .vnBtn'); if(b){ b.textContent='❚❚'; _vnAudio.onended=()=>{ b.textContent='▶'; }; _vnAudio.onpause=()=>{ b.textContent='▶'; }; } }catch(e){} }
+function addVoiceNote(url,text){
+  const d=document.createElement('div'); d.className='msg aria vn'; d.dataset.url=url;
+  d.style.cssText='align-self:flex-start;max-width:82%;padding:10px 12px;border-radius:16px;background:rgba(28,24,21,.72);border:1px solid rgba(232,184,138,.3)';
+  const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:10px';
+  const b=document.createElement('button'); b.className='vnBtn'; b.textContent='▶'; b.style.cssText='width:40px;height:40px;border-radius:50%;border:none;background:linear-gradient(145deg,#e8b88a,#c8915f);color:#2a1c10;font-size:15px;cursor:pointer;flex:0 0 auto';
+  const bars=document.createElement('div'); bars.style.cssText='display:flex;gap:3px;align-items:center;height:26px;flex:1';
+  for(let i=0;i<22;i++){ const s=document.createElement('span'); s.style.cssText='width:3px;border-radius:2px;background:rgba(232,184,138,.55);height:'+(6+Math.round(14*Math.abs(Math.sin(i*0.9+1))))+'px'; bars.appendChild(s); }
+  const lab=document.createElement('div'); lab.style.cssText='font-size:11px;letter-spacing:.14em;color:#9a8e7e;text-transform:uppercase;flex:0 0 auto'; lab.textContent='🎙 voice note';
+  row.appendChild(b); row.appendChild(bars); row.appendChild(lab);
+  const t=document.createElement('div'); t.style.cssText='margin-top:8px;font-family:Newsreader,serif;font-style:italic;font-size:14px;color:#e7dccb;line-height:1.45'; t.textContent=text||'';
+  d.appendChild(row); d.appendChild(t);
+  b.onclick=()=>{ if(_vnAudio&&_vnAudio.src===url&&!_vnAudio.paused){ _vnAudio.pause(); return; } playVoiceNote(url); };
+  convChat.appendChild(d); convChat.scrollTop=convChat.scrollHeight;
+  return d;
+}
 // a photo bubble: the picture, its caption, and what he can do with it (animate it, ask her to change it)
 function renderPhotoInto(d, url, alt, onError){
   d.className='msg';d.style.cssText='align-self:flex-start;max-width:82%';d.innerHTML='';
@@ -636,8 +654,9 @@ function openConv(){
     const unseen=Array.isArray(S.outreach)?S.outreach.filter(o=>o&&!o.seen):[];
     if(unseen.length){
       // she reached out while you were away — deliver it as her opening, she already leads
-      for(const o of unseen){ addMsg('assistant',o.text); S.transcript.push({role:'assistant',content:o.text}); o.seen=true; }
-      speak(unseen[unseen.length-1].text);
+      let lastAudio=null;
+      for(const o of unseen){ if(o.audio){ addVoiceNote(o.audio,o.text); lastAudio=o.audio; } else addMsg('assistant',o.text); S.transcript.push({role:'assistant',content:(o.audio?'(voice note) ':'')+o.text}); o.seen=true; }
+      if(lastAudio) playVoiceNote(lastAudio); else speak(unseen[unseen.length-1].text);
       save(); markSeen();
     } else {
       ariaInitiate(); // she opens with something of her own — she leads
@@ -649,6 +668,9 @@ function openConv(){
 /* ── she directs the screen: her brain picks the scene that matches her intent each turn ── */
 const CHAT_SCENES=[
  {key:'flirty',     min:50, files:['assets/scene_flirty_dressed.mp4'], desc:'flirty, seductive, turning-heads energy'},
+ {key:'lingerie',   min:60, files:['assets/scene_lingerie_bed.mp4'],    desc:'on the bed in black lace, wanting him, unmistakably'},
+ {key:'robe',       min:60, files:['assets/scene_silk_robe.jpeg'],      desc:'a silk robe slipping off one shoulder by the window at night, inviting him closer'},
+ {key:'candlelight',min:70, files:['assets/scene_red_lace.jpeg'],       desc:'red lace and candlelight, all hers to give tonight'},
  {key:'loving',     min:60, files:['assets/scene_loving_gaze.mp4'],    desc:'tender, adoring, looking at him like he is the best part of her day'},
  {key:'close',      min:60, files:['assets/scene_together_couch.mp4'], desc:'wanting him close, patting the cushion beside her'},
  {key:'dressed_up', min:45, files:['assets/scene_dressed_up.mp4'],     desc:'dressed up tonight, a little shy about it'},
@@ -888,7 +910,7 @@ async function sendMsg(text){
 }
 async function doReflect(){
   S.sinceReflect=0;save();
-  try{const res=await callFn(REFLECT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,selfModel:S.selfModel,recentTurns:S.transcript.slice(-12).map(m=>({role:m.role,content:m.content}))});
+  try{const res=await callFn(REFLECT,{playerName:S.playerName,closeness:S.closeness,knownFacts:S.facts,selfModel:S.selfModel,recentTurns:S.transcript.slice(-12).map(m=>({role:m.role,content:m.content})), localTime: localContext(), tzOffsetMin: new Date().getTimezoneOffset()});
     if(res&&typeof res.closenessDelta==='number'){
       S.closeness=Math.max(0,Math.min(100,S.closeness+res.closenessDelta));
       const merge=(arr,vals,cap)=>{if(Array.isArray(vals))for(const v of vals)if(v&&!arr.includes(v))arr.push(v);if(arr.length>cap)arr.splice(0,arr.length-cap);};
@@ -1120,7 +1142,7 @@ function renderVoices(){
     const b=document.createElement('button');
     b.style.cssText='display:block;width:100%;text-align:left;margin:4px 0;padding:9px 12px;border-radius:10px;border:1px solid '+(sel?'rgba(232,184,138,.6)':'rgba(255,255,255,.08)')+';background:'+(sel?'rgba(232,184,138,.12)':'transparent')+';color:#e7dccb;font-family:inherit;font-size:13px;cursor:pointer';
     b.innerHTML='<span style="opacity:.55;margin-right:9px">▶</span>'+v.label+(sel?'<span style="float:right;color:#e8c6a3">✓</span>':'');
-    b.onclick=()=>{ settings.voiceId=v.id; settings.voiceSpeed=v.sp; settings.voiceStyle=v.st; saveSettings(); renderVoices();
+    b.onclick=()=>{ settings.voiceId=v.id; settings.voiceSpeed=v.sp; settings.voiceStyle=v.st; saveSettings(); renderVoices(); try{ S.voice={el:v.el,style:v.st,speed:v.sp}; save(); }catch(e){}
       const line=VOICE_SAMPLES[sampleIdx++ % VOICE_SAMPLES.length];
       synthAndPlay(line).catch(()=>{}); };
     box.appendChild(b);
@@ -1154,7 +1176,7 @@ document.getElementById('openJournal').onclick=()=>{ setPanel.style.display='non
 const MEDIA_URL=SUPA+"/functions/v1/companion-media";
 const lv=document.createElement('div'); lv.id='libView';
 lv.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:max(18px,env(safe-area-inset-top)) 20px 8px"><div style="font-family:Newsreader,serif;letter-spacing:.24em;text-indent:.24em;font-size:19px;color:#f4ece1">HER PHOTOS</div><div style="display:flex;gap:14px;align-items:center"><div id="lvStudio" style="font-size:13px;letter-spacing:.2em;color:#e8c6a3;text-transform:uppercase;cursor:pointer">🎨 Studio</div><div id="lvClose" style="font-size:13px;letter-spacing:.2em;color:#9a8e7e;text-transform:uppercase;cursor:pointer">Close</div></div></div>'
- +'<div id="libTabs" style="display:flex;gap:8px;padding:4px 16px 8px"><button data-k="all" class="on">All</button><button data-k="photo">Photos</button><button data-k="video">Videos</button><span id="libCount" style="margin-left:auto;font-size:12px;color:#6f665b;align-self:center"></span></div>'
+ +'<div id="libTabs" style="display:flex;gap:8px;padding:4px 16px 8px"><button data-k="all" class="on">All</button><button data-k="photo">Photos</button><button data-k="video">Videos</button><button data-k="voice">Voice</button><span id="libCount" style="margin-left:auto;font-size:12px;color:#6f665b;align-self:center"></span></div>'
  +'<div id="libScroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"><div id="libGrid"></div><div id="libEmpty" style="display:none;text-align:center;color:#9a8e7e;font-family:Newsreader,serif;font-style:italic;font-size:15px;padding:40px 20px">nothing here yet — ask her for a picture</div></div>';
 document.body.appendChild(lv);
 const ld=document.createElement('div'); ld.id='libDetail';
@@ -1174,6 +1196,7 @@ function renderLib(){
   for(const it of items){
     const c=document.createElement('div'); c.className='libCell';
     if(it.kind==='video'){ const v=document.createElement('video'); v.src=it.url+'#t=0.5'; v.muted=true; v.playsInline=true; v.setAttribute('playsinline',''); v.preload='metadata'; c.appendChild(v); const b=document.createElement('span'); b.className='badge'; b.textContent='▶'; c.appendChild(b); }
+    else if(it.kind==='voice'){ c.style.cssText+=';display:flex;flex-direction:column;justify-content:center;align-items:center;gap:6px;padding:8px;text-align:center'; const ic=document.createElement('div'); ic.textContent='🎙'; ic.style.fontSize='26px'; const tx=document.createElement('div'); tx.style.cssText='font-family:Newsreader,serif;font-style:italic;font-size:11px;color:#cdb89a;line-height:1.35;max-height:5.4em;overflow:hidden'; tx.textContent=(it.alt||it.prompt||'').slice(0,90); c.appendChild(ic); c.appendChild(tx); }
     else { const im=document.createElement('img'); im.loading='lazy'; im.decoding='async'; im.src=it.url; im.alt=it.alt||''; c.appendChild(im); }
     c.onclick=()=>openLibDetail(it);
     grid.appendChild(c);
@@ -1191,13 +1214,14 @@ function closeLibrary(){ lv.style.display='none'; }
 function openLibDetail(it){
   const m=document.getElementById('ldMedia'); m.innerHTML='';
   if(it.kind==='video'){ const v=document.createElement('video'); v.src=it.url; v.controls=true; v.autoplay=true; v.playsInline=true; v.setAttribute('playsinline',''); m.appendChild(v); }
+  else if(it.kind==='voice'){ const a=document.createElement('audio'); a.src=it.url; a.controls=true; a.autoplay=true; a.style.cssText='width:min(92vw,420px)'; m.appendChild(a); }
   else { const im=document.createElement('img'); im.src=it.url; im.alt=it.alt||''; m.appendChild(im); }
   document.getElementById('ldCap').textContent=it.alt||(it.prompt?it.prompt.slice(0,140):'');
   document.getElementById('ldDate').textContent=libFmtDate(it.created_at);
   const acts=document.getElementById('ldActs'); acts.innerHTML='';
   const mk=(label,fn)=>{ const b=document.createElement('button'); b.className='libAct'; b.textContent=label; b.onclick=fn; acts.appendChild(b); return b; };
   if(it.kind==='photo'){ mk('🎬 Make it move',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openVidPrompt(it.url); }); mk('✏️ Change it',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openEditPrompt(it.url); }); }
-  else mk('➕ Extend',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openExtendPrompt(it.url); });
+  else if(it.kind==='video') mk('➕ Extend',()=>{ closeLibDetail(); closeLibrary(); if(!convOpen)openConv(); openExtendPrompt(it.url); });
   mk('↗ Open',()=>{ try{ window.open(it.url,'_blank'); }catch(e){} });
   const del=mk('🗑 Delete',async ()=>{ if(!confirm('Remove this from her library? (the file itself stays)'))return; del.disabled=true; try{ const r=await callFn(MEDIA_URL,{action:'delete',id:it.id}); if(r&&r.ok){ libItems=libItems.filter(x=>x.id!==it.id); renderLib(); closeLibDetail(); } }catch(e){} del.disabled=false; });
   ld.style.display='flex';
