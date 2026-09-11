@@ -22,6 +22,9 @@
   @keyframes bobwalk{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.4%)}}
   #bgB{opacity:0;}
   #bgVid{opacity:0;animation:aliveDrift 13s ease-in-out infinite;}
+  /* portrait loop on a landscape window: show the whole figure, fill the sides with a blurred copy */
+  #bgFill{opacity:0;filter:blur(38px) brightness(.55) saturate(1.1);transform:scale(1.12);transition:opacity 1s ease}
+  .bg.fitContain{object-fit:contain}
   @keyframes aliveDrift{0%,100%{transform:scale(1.0) translateY(0)}50%{transform:scale(1.02) translateY(-0.5%)}}
   #vig{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 200px 50px rgba(8,6,7,.65);
     background:linear-gradient(180deg,rgba(8,6,7,.25),rgba(8,6,7,0) 22%,rgba(8,6,7,0) 60%,rgba(8,6,7,.85));}
@@ -128,6 +131,7 @@
 </style>
 </head>
 <body>
+<img id="bgFill" class="bg" alt="" aria-hidden="true">
 <img id="bgA" class="bg" src="assets/room_living.jpeg" alt="">
 <img id="bgB" class="bg" alt="">
 <video id="bgVid" class="bg" muted playsinline preload="auto"></video>
@@ -206,7 +210,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-11.40"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-11.41"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -366,8 +370,28 @@ function fmtClock(){const d=new Date();let h=d.getHours(),m=d.getMinutes(),ap=h<
 function partOfDay(){const h=Math.floor(hour());return h<5?'late night':h<12?'morning':h<17?'afternoon':h<21?'evening':'night';}
 function localContext(){const d=new Date();return d.toLocaleDateString(undefined,{weekday:'long'})+' '+partOfDay()+', '+fmtClock();}
 
-const bgA=document.getElementById('bgA'),bgB=document.getElementById('bgB'),bgVid=document.getElementById('bgVid');
+const bgA=document.getElementById('bgA'),bgB=document.getElementById('bgB'),bgVid=document.getElementById('bgVid'),bgFill=document.getElementById('bgFill');
 let frontA=true,curImg='assets/room_living.jpeg';
+// Orientation-aware fit: the newer scene loops are portrait (716x1284) while the originals are landscape.
+// object-fit:cover on a landscape window crops a portrait loop down to her torso, so on desktop we
+// letterbox the portrait media (contain) and fill the sides with a blurred frame of the same scene.
+let fitEl=null;
+function mediaIsPortrait(el){const w=el.videoWidth||el.naturalWidth||0,h=el.videoHeight||el.naturalHeight||0;return w>0&&h>w;}
+function paintFill(el){
+  try{
+    const c=document.createElement('canvas');c.width=64;c.height=Math.max(1,Math.round(64*(el.videoHeight||el.naturalHeight)/(el.videoWidth||el.naturalWidth)));
+    c.getContext('2d').drawImage(el,0,0,c.width,c.height);bgFill.src=c.toDataURL('image/jpeg',.7);
+  }catch(e){}
+}
+function fitBackdrop(el){
+  if(el)fitEl=el; el=fitEl; if(!el)return;
+  const need=mediaIsPortrait(el)&&window.innerWidth>window.innerHeight*1.05;
+  el.classList.toggle('fitContain',need);
+  if(need){paintFill(el);bgFill.style.opacity='1';}else bgFill.style.opacity='0';
+}
+window.addEventListener('resize',()=>fitBackdrop());
+bgVid.addEventListener('loadeddata',()=>{if(bgVid.style.opacity==='1')fitBackdrop(bgVid);});
+bgVid.addEventListener('ended',()=>{if(bgVid.classList.contains('fitContain'))paintFill(bgVid);});
 function setBackdrop(src){
   if(src===curImg)return;curImg=src;
   const isVid=/\.mp4(\?|$)/.test(src);
@@ -377,10 +401,11 @@ function setBackdrop(src){
     try{bgVid.currentTime=0;}catch(e){}
     const p=bgVid.play(); if(p&&p.catch)p.catch(()=>{});
     bgVid.style.opacity='1';bgA.style.opacity='0';bgB.style.opacity='0';
+    if(bgVid.readyState>=2)fitBackdrop(bgVid); else {bgA.classList.remove('fitContain');bgB.classList.remove('fitContain');}
     return;
   }
   const show=frontA?bgB:bgA, hide=frontA?bgA:bgB;
-  const reveal=()=>{show.style.opacity='1';hide.style.opacity='0';bgVid.style.opacity='0';frontA=!frontA;};
+  const reveal=()=>{show.style.opacity='1';hide.style.opacity='0';bgVid.style.opacity='0';frontA=!frontA;fitBackdrop(show);};
   show.onload=reveal;
   if(show.getAttribute('src')===src) reveal(); else show.src=src;
 }
