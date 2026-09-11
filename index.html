@@ -206,7 +206,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-11.38"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-11.39"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -700,6 +700,22 @@ const CHAT_SCENES=[
  {key:'pool',       min:0,  files:['assets/scene_backyard_pool.mp4'],  desc:'out by the pool, sun, playful'},
 ];
 function scenesForCloseness(){ return CHAT_SCENES.filter(s=>(s.min||0)<=S.closeness).map(s=>({key:s.key,desc:s.desc})); }
+// He invited her somewhere ("let's take a shower"): if that scene is unlocked and her reply didn't set one, go there.
+const PLACE_SCENES=[
+  [/\b(skinny.?dip|naked in the pool|nude in the pool|swim naked)\b/i,'skinny_dip'],
+  [/\b(shower)\b/i,'shower'],
+  [/\b(bath|bathtub|tub)\b/i,'bath'],
+  [/\b(pool|swim|swimming|hot tub)\b/i,'pool_bikini'],
+  [/\b(bed|bedroom|lie down|lay down)\b/i,'lingerie'],
+  [/\b(couch|sofa|movie|netflix)\b/i,'couch_bare'],
+  [/\b(kitchen|cook|dinner)\b/i,'baking'],
+];
+function invitedScene(text){
+  const t=String(text||''); if(!/\b(let'?s|lets|come|join me|wanna|want to|we should|take a|go)\b/i.test(t))return null;
+  const ok=new Set(scenesForCloseness().map(s=>s.key));
+  for(const [re,key] of PLACE_SCENES){ if(re.test(t)){ return ok.has(key)?key:null; } }
+  return null;
+}
 // Has he gone quiet on her? Compare his last few messages with how he used to talk to her.
 function withdrawalSignal(){
   try{
@@ -929,7 +945,7 @@ async function sendMsg(text){
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
     if(window._callMode){ setCallState&&setCallState('speaking…'); if(window._callSafety)clearTimeout(window._callSafety); window._callSafety=setTimeout(()=>{try{openCallMic();}catch(e){}},Math.max(5000,reply.split(/\s+/).length*420)); }
-    if(res&&res.scene)applyChatScene(res.scene);
+    if(res&&res.scene)applyChatScene(res.scene); else { const inv=invitedScene(text); if(inv)applyChatScene(inv); }
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
     if(res&&res.video&&res.video.prompt)setTimeout(()=>requestVideo(res.video.prompt,null,{fromDirective:true}),50);
     awayFor=null; markSeen();
