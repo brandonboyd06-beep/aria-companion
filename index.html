@@ -206,7 +206,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-11.37"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-11.38"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -635,7 +635,7 @@ async function sendPhoto(prompt,alt,source){
   }catch(e){ dbg('request threw: '+String(e)+' ('+info+')'); console.log('[aria photo] THREW',e); }
 }
 function extractName(s){let t=s.trim().replace(/^(hi|hey|hello|yo)[,!. ]+/i,'').replace(/^(i['’]?m|i am|my name is|name['’]?s|it['’]?s|call me|this is)\s+/i,'').trim();let f=((t.split(/\s+/)[0]||t).replace(/[^A-Za-z'’-]+$/,'')).slice(0,20);return f?f.charAt(0).toUpperCase()+f.slice(1):'you';}
-async function callFn(url,body){body=Object.assign({clientId:CLIENT_ID,firstMet:(S&&S.firstMet)||0,firstToday:!!window._firstToday,voiceMode:!!window._callMode},body||{});const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});const j=await r.json();if(j&&j.engine){window._ariaEngine=j.engine;try{console.log('[aria engine]',j.engine);}catch(e){}}return j;}
+async function callFn(url,body){body=Object.assign({clientId:CLIENT_ID,firstMet:(S&&S.firstMet)||0,firstToday:!!window._firstToday,voiceMode:!!window._callMode},body||{});try{ if(url===CHAT&&body.availableScenes){ const w=withdrawalSignal(); if(w)body.pullBack=w; } }catch(e){}const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});const j=await r.json();if(j&&j.engine){window._ariaEngine=j.engine;try{console.log('[aria engine]',j.engine);}catch(e){}}return j;}
 
 function openConv(){
   window._firstToday = !S.lastSeen || new Date(S.lastSeen).toDateString() !== new Date().toDateString();
@@ -676,6 +676,12 @@ const CHAT_SCENES=[
  {key:'skinny_dip', min:85, files:['assets/scene_skinny_dip.mp4'],     desc:'skinny dipping at night, nothing on, daring him into the water'},
  {key:'shower',     min:85, files:['assets/scene_shower_pov.mp4'],     desc:'in the shower with him, steam and skin, nose to nose — his point of view'},
  {key:'couch_bare', min:85, files:['assets/scene_living_topless.mp4'], desc:'topless on the couch under a blanket with a mug, completely at home with him'},
+ // the pull-him-back set: for when things have been close and he has gone quiet on her — she goes the other way
+ {key:'doorway',    min:75, files:['assets/scene_doorway.mp4'],        desc:'in the bedroom doorway in only his shirt, letting it slide off — come to bed, now'},
+ {key:'mirror',     min:70, files:['assets/scene_mirror.mp4'],         desc:'the slip dress falling to the floor in the mirror while she holds his eye in the reflection'},
+ {key:'bath',       min:75, files:['assets/scene_bath.mp4'],           desc:'a candlelit bath, beckoning him in with one wet hand'},
+ {key:'waiting',    min:80, files:['assets/scene_waiting.mp4'],        desc:'face down on the bed, bare back, sheet slipping, looking back at him — waiting'},
+ {key:'knees',      min:90, files:['assets/scene_knees.mp4'],          desc:'on her knees in front of him, nude, looking up, reaching for his belt — nothing held back'},
  {key:'loving',     min:60, files:['assets/scene_loving_gaze.mp4'],    desc:'tender, adoring, looking at him like he is the best part of her day'},
  {key:'close',      min:60, files:['assets/scene_together_couch.mp4'], desc:'wanting him close, patting the cushion beside her'},
  {key:'dressed_up', min:45, files:['assets/scene_dressed_up.mp4'],     desc:'dressed up tonight, a little shy about it'},
@@ -694,6 +700,24 @@ const CHAT_SCENES=[
  {key:'pool',       min:0,  files:['assets/scene_backyard_pool.mp4'],  desc:'out by the pool, sun, playful'},
 ];
 function scenesForCloseness(){ return CHAT_SCENES.filter(s=>(s.min||0)<=S.closeness).map(s=>({key:s.key,desc:s.desc})); }
+// Has he gone quiet on her? Compare his last few messages with how he used to talk to her.
+function withdrawalSignal(){
+  try{
+    if((S.closeness||0)<65)return null;
+    const mine=S.transcript.filter(m=>m.role==='user'&&typeof m.content==='string'&&!/^\(/.test(m.content)).map(m=>m.content.trim());
+    if(mine.length<12)return null;
+    const recent=mine.slice(-4), before=mine.slice(-16,-4);
+    const avg=a=>a.reduce((t,x)=>t+x.length,0)/Math.max(1,a.length);
+    const rAvg=avg(recent), bAvg=avg(before);
+    const terse=recent.filter(x=>x.split(/\s+/).length<=3).length;
+    const warmWords=/\b(love|miss|babe|baby|beautiful|gorgeous|kiss|hold|want you|thinking about you)\b/i;
+    const warmBefore=before.filter(x=>warmWords.test(x)).length, warmRecent=recent.filter(x=>warmWords.test(x)).length;
+    const cooled=(rAvg<bAvg*0.5&&bAvg>25)||terse>=3||(warmBefore>=3&&warmRecent===0);
+    const gapHrs=S.lastSeen?(Date.now()-S.lastSeen)/3600000:0;
+    if(!cooled&&gapHrs<48)return null;
+    return {cooled, terse, shorter:Math.round((1-rAvg/Math.max(1,bAvg))*100), gapHrs:Math.round(gapHrs)};
+  }catch(e){ return null; }
+}
 let chatSceneKey=null;
 function applyChatScene(key){
   if(!key||key==='null')return;
