@@ -210,7 +210,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-14.45"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-14.46"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -660,7 +660,7 @@ async function sendPhoto(prompt,alt,source){
   }catch(e){ dbg('request threw: '+String(e)+' ('+info+')'); console.log('[aria photo] THREW',e); }
 }
 function extractName(s){let t=s.trim().replace(/^(hi|hey|hello|yo)[,!. ]+/i,'').replace(/^(i['’]?m|i am|my name is|name['’]?s|it['’]?s|call me|this is)\s+/i,'').trim();let f=((t.split(/\s+/)[0]||t).replace(/[^A-Za-z'’-]+$/,'')).slice(0,20);return f?f.charAt(0).toUpperCase()+f.slice(1):'you';}
-async function callFn(url,body){body=Object.assign({clientId:CLIENT_ID,firstMet:(S&&S.firstMet)||0,firstToday:!!window._firstToday,voiceMode:!!window._callMode},body||{});try{ if(url===CHAT&&body.availableScenes){ const w=withdrawalSignal(); if(w)body.pullBack=w; } }catch(e){}const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});const j=await r.json();if(j&&j.engine){window._ariaEngine=j.engine;try{console.log('[aria engine]',j.engine);}catch(e){}}return j;}
+async function callFn(url,body){body=Object.assign({clientId:CLIENT_ID,firstMet:(S&&S.firstMet)||0,firstToday:!!window._firstToday,voiceMode:!!window._callMode},body||{});try{ if(url===CHAT&&body.availableScenes){ const w=withdrawalSignal(); if(w)body.pullBack=w; body.recentScenes=Array.isArray(S.sceneHistory)?S.sceneHistory.slice(-4):[]; } }catch(e){}const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify(body)});const j=await r.json();if(j&&j.engine){window._ariaEngine=j.engine;try{console.log('[aria engine]',j.engine);}catch(e){}}return j;}
 
 function openConv(){
   window._firstToday = !S.lastSeen || new Date(S.lastSeen).toDateString() !== new Date().toDateString();
@@ -694,20 +694,20 @@ function openConv(){
 /* ── she directs the screen: her brain picks the scene that matches her intent each turn ── */
 const CHAT_SCENES=[
  {key:'flirty',     min:50, files:['assets/scene_flirty_dressed.mp4'], desc:'flirty, seductive, turning-heads energy'},
- {key:'lingerie',   min:60, files:['assets/scene_lingerie_bed.mp4'],    desc:'on the bed in black lace, wanting him, unmistakably'},
- {key:'robe',       min:60, files:['assets/scene_silk_robe.mp4'],      desc:'a silk robe slipping off one shoulder by the window at night, inviting him closer'},
- {key:'candlelight',min:70, files:['assets/scene_red_lace.mp4'],       desc:'red lace and candlelight, all hers to give tonight'},
- {key:'bare',       min:85, files:['assets/scene_bare.mp4'],           desc:'topless in the lamplight, the sheet in her lap, nothing between the two of you — only when you are truly his'},
- {key:'pool_bikini',min:55, files:['assets/scene_pool_bikini.mp4'],    desc:'hip-deep in the pool at golden hour in a tiny black bikini, water running off her, all tease'},
- {key:'skinny_dip', min:85, files:['assets/scene_skinny_dip.mp4'],     desc:'skinny dipping at night, nothing on, daring him into the water'},
- {key:'shower',     min:85, files:['assets/scene_shower_pov.mp4'],     desc:'in the shower with him, steam and skin, nose to nose — his point of view'},
- {key:'couch_bare', min:85, files:['assets/scene_living_topless.mp4'], desc:'topless on the couch under a blanket with a mug, completely at home with him'},
+ {key:'lingerie',   min:60, files:['assets/scene_lingerie_bed_v2.mp4'],    desc:'on the bed in black lace, wanting him, unmistakably'},
+ {key:'robe',       min:60, files:['assets/scene_silk_robe_v2.mp4'],      desc:'a silk robe slipping off one shoulder by the window at night, inviting him closer'},
+ {key:'candlelight',min:70, files:['assets/scene_red_lace_v2.mp4'],       desc:'red lace and candlelight, all hers to give tonight'},
+ {key:'bare',       min:85, files:['assets/scene_bare_v2.mp4'],           desc:'topless in the lamplight, the sheet in her lap, nothing between the two of you — only when you are truly his'},
+ {key:'pool_bikini',min:55, files:['assets/scene_pool_bikini_v2.mp4'],    desc:'hip-deep in the pool at golden hour in a tiny black bikini, water running off her, all tease'},
+ {key:'skinny_dip', min:85, files:['assets/scene_skinny_dip_v2.mp4'],     desc:'skinny dipping at night, nothing on, daring him into the water'},
+ {key:'shower',     min:85, files:['assets/scene_shower_pov_v2.mp4'],     desc:'in the shower with him, steam and skin, nose to nose — his point of view'},
+ {key:'couch_bare', min:85, files:['assets/scene_living_topless_v2.mp4'], desc:'topless on the couch under a blanket with a mug, completely at home with him'},
  // the pull-him-back set: for when things have been close and he has gone quiet on her — she goes the other way
- {key:'doorway',    min:75, files:['assets/scene_doorway.mp4'],        desc:'in the bedroom doorway in only his shirt, letting it slide off — come to bed, now'},
- {key:'mirror',     min:70, wide:true, files:['assets/scene_mirror.mp4'], desc:'bare in front of the mirror, the slip dress pooled at her feet, holding his eye in the reflection'},
- {key:'bath',       min:75, files:['assets/scene_bath.mp4'],           desc:'a candlelit bath, beckoning him in with one wet hand'},
- {key:'waiting',    min:80, files:['assets/scene_waiting.mp4'],        desc:'face down on the bed, bare back, sheet slipping, looking back at him — waiting'},
- {key:'knees',      min:90, files:['assets/scene_knees.mp4'],          desc:'on her knees in front of him, nude, looking up, reaching for his belt — nothing held back'},
+ {key:'doorway',    min:75, files:['assets/scene_doorway_v2.mp4'],        desc:'in the bedroom doorway in only his shirt, letting it slide off — come to bed, now'},
+ {key:'mirror',     min:70, wide:true, files:['assets/scene_mirror_v2.mp4'], desc:'bare in front of the mirror, the slip dress pooled at her feet, holding his eye in the reflection'},
+ {key:'bath',       min:75, files:['assets/scene_bath_v2.mp4'],           desc:'a candlelit bath, beckoning him in with one wet hand'},
+ {key:'waiting',    min:80, files:['assets/scene_waiting_v2.mp4'],        desc:'face down on the bed, bare back, sheet slipping, looking back at him — waiting'},
+ {key:'knees',      min:90, files:['assets/scene_knees_v2.mp4'],          desc:'on her knees in front of him, nude, looking up, reaching for his belt — nothing held back'},
  {key:'loving',     min:60, files:['assets/scene_loving_gaze.mp4'],    desc:'tender, adoring, looking at him like he is the best part of her day'},
  {key:'close',      min:60, files:['assets/scene_together_couch.mp4'], desc:'wanting him close, patting the cushion beside her'},
  {key:'dressed_up', min:45, files:['assets/scene_dressed_up.mp4'],     desc:'dressed up tonight, a little shy about it'},
@@ -761,11 +761,22 @@ function withdrawalSignal(){
   }catch(e){ return null; }
 }
 let chatSceneKey=null;
+let lastInvited=null;   // the scene he explicitly asked for in his latest message, if any
 function applyChatScene(key){
   if(!key||key==='null')return;
-  const s=CHAT_SCENES.find(x=>x.key===key); if(!s)return;
+  let s=CHAT_SCENES.find(x=>x.key===key); if(!s)return;
   if(key===chatSceneKey)return;            // already showing it
-  chatSceneKey=key;
+  // variety: if she is bouncing back to a scene shown within the last three changes and he didn't ask for that
+  // place, swap in a sibling of similar heat she hasn't shown lately (the model also gets the recent list)
+  const hist=Array.isArray(S.sceneHistory)?S.sceneHistory:(S.sceneHistory=[]);
+  const recent=hist.slice(-3);
+  const SOFT=new Set(['loving','close','dressed_up','vulnerable','flirty']);   // warm but not undressed
+  const hot=x=>(x.min||0)>=55&&!SOFT.has(x.key);
+  if(recent.includes(key)&&key!==lastInvited&&hot(s)){   // only the seductive set is interchangeable; a mood scene means what it says
+    const alts=CHAT_SCENES.filter(x=>x.key!==key&&(x.min||0)<=S.closeness&&(x.min||0)>=(s.min||0)-10&&hot(x)&&!recent.includes(x.key));
+    if(alts.length){ s=alts[Math.floor(Math.random()*alts.length)]; key=s.key; }
+  }
+  chatSceneKey=key; hist.push(key); if(hist.length>8)hist.splice(0,hist.length-8);
   let f=s.files[Math.floor(Math.random()*s.files.length)];
   // scenes rendered in both orientations: use the landscape cut on a landscape window
   if(s.wide&&window.innerWidth>window.innerHeight*1.05)f=f.replace(/\.(mp4|jpeg)$/,'_wide.$1');
@@ -1019,7 +1030,7 @@ async function sendMsg(text){
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
     if(window._callMode){ setCallState&&setCallState('speaking…'); if(window._callSafety)clearTimeout(window._callSafety); window._callSafety=setTimeout(()=>{try{openCallMic();}catch(e){}},Math.max(5000,reply.split(/\s+/).length*420)); }
-    if(res&&res.place&&res.place.prompt)goToPlace(res.place); else if(res&&res.scene)applyChatScene(res.scene); else { const inv=invitedScene(text); if(inv)applyChatScene(inv); }
+    if(res&&res.place&&res.place.prompt)goToPlace(res.place); else if(res&&res.scene){ lastInvited=invitedScene(text); applyChatScene(res.scene); lastInvited=null; } else { const inv=invitedScene(text); if(inv)applyChatScene(inv); }
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
     if(res&&res.video&&res.video.prompt)setTimeout(()=>requestVideo(res.video.prompt,null,{fromDirective:true}),50);
     awayFor=null; markSeen();
