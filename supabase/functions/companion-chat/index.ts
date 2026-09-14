@@ -72,6 +72,7 @@ function sceneInstruction(s: any): string {
   const sceneBlock = scenes.length
     ? `YOU CONTROL THE SCREEN. You decide what he sees of you. Each time you speak, choose the on-screen scene that matches what you are feeling or doing in THIS reply — give him your seductive look when you're being seductive, let him see you go quiet when you're hurting.\n\nScenes available to you (key: when it fits):\n${scenes.map((x: any) => `- ${x.key}: ${x.desc || ""}`).join("\n")}\n\nPick the ONE key that genuinely matches this moment, or null to leave the screen unchanged (use null when nothing shifted — don't force a change every line). Never mention the scene or the keys in your reply text; just live it.\nGOING SOMEWHERE WITH HIM: if he invites you somewhere or into something — a bath, the shower, the pool, skinny dipping, bed, the couch — and a scene for it is in your list, say yes in your voice and SET THAT SCENE this turn (you're there now). If the fitting scene is NOT in your list, it isn't available to you yet: don't pretend to go; answer in character (tease him, make him earn it, suggest what you would do instead) and leave the scene as it was.\n`
     : `Set "scene" to null.\n`;
+  const placeBlock = `\nTAKING HIM SOMEWHERE NEW: the scene list is not the whole world. If he asks to go somewhere that isn't on it ("take me to the beach", "let's get a hotel room", "come sit on the roof with me"), or if you want a change of scenery yourself, set "place" instead of "scene": one vivid wide-shot description of the place and of you in it (light, time of day, what you're wearing, what you're doing), plus a short name. The screen behind the chat becomes that place with you in it a few seconds later, so speak as if you're already there. Set "scene" to null when you set "place". On your own initiative do this rarely${(Number(s.closeness) || 0) >= 60 ? " and only when the moment calls for it" : ", and not yet: you're still early with him, so only when he asks"}. Never describe the place-change mechanics to him.\n`;
 
   let imageBlock = `SENDING A PICTURE: attach a photo to your reply by setting "image". Do it whenever showing beats telling — and ALWAYS when he asks to see you, what you're wearing, what you're doing, or something you have or made. "image".prompt = a vivid description of exactly what's in the frame (you can be in it, in your home), "alt" = a 2-4 word caption. When you send one, your reply sounds like you're showing it ("here —", "look", "made this for you"). Once in a while, when it feels natural, OFFER on your own ("want to see?") rather than waiting to be asked. Don't bolt a photo onto unrelated replies, but NEVER refuse or claim you can't send pictures. Never depict real public figures, logos, or readable text.\n`;
   if (s.wantPhoto) imageBlock += `\nRIGHT NOW: he just tapped to see you. You MUST set "image" to a photo of YOU in your current setting (a selfie-style shot) — image is NOT null. Keep the reply short, like you're sending it.\n`;
@@ -81,7 +82,7 @@ function sceneInstruction(s: any): string {
   const exprBlock = `YOUR FACE: with every reply, pick the expression on your face as you say it — one of: warm, flirty, soft, playful, happy, loving, sad, surprised, neutral. It should match the feeling of THIS line.\n`;
 
   const cueBlock = `SPOKEN CUES: your reply is read aloud by a voice engine that performs short bracketed cues: [soft], [whispers], [giggles], [laughs], [sighs], [teasing], [breathy], [excited]. Use at most two per reply, each at the start of a sentence, only when the moment calls for it (a whisper when you're close, a giggle when he makes you laugh). Most replies need none. Never write any other bracketed text.`;
-  return `${sceneBlock}\n${imageBlock}\n${exprBlock}\n${cueBlock}\nOUTPUT FORMAT — reply ONLY with strict JSON, nothing else:\n{"reply": "<what you say, in your voice>", "expression": "<one expression>", "scene": "<one scene key, or null>", "image": null OR {"prompt": "<vivid visual description of what's in the photo>", "alt": "<2-4 word caption>"}, "video": null OR {"prompt": "<what she does in a few seconds, and where>", "alt": "<2-4 word caption>"}}`;
+  return `${sceneBlock}${placeBlock}\n${imageBlock}\n${exprBlock}\n${cueBlock}\nOUTPUT FORMAT — reply ONLY with strict JSON, nothing else:\n{"reply": "<what you say, in your voice>", "expression": "<one expression>", "scene": "<one scene key, or null>", "image": null OR {"prompt": "<vivid visual description of what's in the photo>", "alt": "<2-4 word caption>"}, "video": null OR {"prompt": "<what she does in a few seconds, and where>", "alt": "<2-4 word caption>"}, "place": null OR {"prompt": "<wide-shot description of a new place with her in it>", "name": "<2-4 word name>"}}`;
 }
 
 // merge transcript into clean alternating user/assistant messages (Claude requires it)
@@ -128,8 +129,14 @@ const REPLY_TOOL = {
         properties: { prompt: { type: "string", description: "What she does in those few seconds and where — she is in the frame." }, alt: { type: "string", description: "2-4 word caption." } },
         required: ["prompt"],
       },
+      place: {
+        type: ["object", "null"],
+        description: "A brand-new setting she takes the two of you to — somewhere NOT on the scene list (a beach at sunset, a rooftop, a cabin, a hotel balcony). The screen behind the chat becomes that place with her in it. Set it when he asks to go somewhere, or on her own initiative when the moment calls for a change of scenery. Otherwise null.",
+        properties: { prompt: { type: "string", description: "Vivid wide-shot description: the place, time of day and light, and her in it — where she is, what she wears, what she is doing. The whole place is visible around her." }, name: { type: "string", description: "2-4 word name for the place." } },
+        required: ["prompt"],
+      },
     },
-    required: ["reply", "expression", "scene", "image", "video"],
+    required: ["reply", "expression", "scene", "image", "video", "place"],
   },
 };
 
@@ -326,7 +333,7 @@ Deno.serve(async (req: Request) => {
     content = content.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const fb = content.indexOf("{"); const lb = content.lastIndexOf("}");
     if (fb >= 0 && lb > fb) content = content.slice(fb, lb + 1);
-    let reply = "", scene: any = null, image: any = null, video: any = null, expression: any = null, parsed = false;
+    let reply = "", scene: any = null, image: any = null, video: any = null, place: any = null, expression: any = null, parsed = false;
     const parseEnvelope = (raw: string) => {
       let c = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
       const fb2 = c.indexOf("{"); const lb2 = c.lastIndexOf("}");
@@ -336,12 +343,15 @@ Deno.serve(async (req: Request) => {
       if (typeof j.expression === "string" && j.expression.trim()) o.expression = j.expression.trim().toLowerCase().slice(0, 20);
       if (j.image && typeof j.image === "object" && typeof j.image.prompt === "string" && j.image.prompt.trim()) o.image = { prompt: j.image.prompt.toString().slice(0, 400), alt: (j.image.alt ? String(j.image.alt) : "").slice(0, 60) };
       if (j.video && typeof j.video === "object" && typeof j.video.prompt === "string" && j.video.prompt.trim()) o.video = { prompt: j.video.prompt.toString().slice(0, 400), alt: (j.video.alt ? String(j.video.alt) : "").slice(0, 60) };
+      o.place = null;
+      if (j.place && typeof j.place === "object" && typeof j.place.prompt === "string" && j.place.prompt.trim()) o.place = { prompt: j.place.prompt.toString().slice(0, 500), name: (j.place.name ? String(j.place.name) : "").slice(0, 40) };
       return o;
     };
     try {
       const o = parseEnvelope(content); parsed = true;
-      reply = o.reply; scene = o.scene; expression = o.expression; image = o.image; video = o.video;
-    } catch { reply = content; scene = null; image = null; video = null; }
+      reply = o.reply; scene = o.scene; expression = o.expression; image = o.image; video = o.video; place = o.place;
+    } catch { reply = content; scene = null; image = null; video = null; place = null; }
+    if (place) scene = null; // a new place replaces the screen; a listed scene would fight it
     const allowed = new Set((Array.isArray(s.availableScenes) ? s.availableScenes : []).map((x: any) => x && x.key).filter(Boolean));
     if (scene && allowed.size && !allowed.has(scene)) scene = null;
     if (!reply) reply = "…";
@@ -383,7 +393,7 @@ Deno.serve(async (req: Request) => {
       videoBy = "director";
     }
 
-    const body: any = { reply, scene, image, video, expression, engine: `${provider}:${useModel}`, fallbackFrom, stage: stageKey, usage: res.usage ?? null };
+    const body: any = { reply, scene, image, video, place, expression, engine: `${provider}:${useModel}`, fallbackFrom, stage: stageKey, usage: res.usage ?? null };
     if (photoBy) body.photoBy = photoBy;
     if (videoBy) body.videoBy = videoBy;
     if (rescuedBy) body.rescuedBy = rescuedBy;

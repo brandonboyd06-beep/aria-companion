@@ -210,7 +210,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-14.44"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-14.45"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -627,7 +627,7 @@ async function editPhoto(url, instruction){
       ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
       recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})), userMessage:'(he asks you to redo the last photo with a change: '+instruction+' — one short line in your voice as you do it; do not attach a new image, it is being edited for you)', availableScenes:scenesForCloseness(), localTime: localContext(), awayFor, lastMood:S.mood});
     if(res&&res.reply)reply=res.reply.trim();
-    if(res&&res.scene)applyChatScene(res.scene);
+    if(res&&res.place&&res.place.prompt)goToPlace(res.place); else if(res&&res.scene)applyChatScene(res.scene);
   }catch(e){}
   addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();markSeen();
   const d=document.createElement('div');d.className='msg photo loading';d.innerHTML='<div class="ph">redoing it…</div>';
@@ -668,6 +668,7 @@ function openConv(){
   document.getElementById('navL').style.display='none';
   document.getElementById('navR').style.display='none';
   conv.classList.add('show'); // scene stays live behind the chat
+  restorePlace();              // if she took you somewhere earlier today, you're still there
   convChat.innerHTML='';
   if(S.transcript.length)for(const m of S.transcript.slice(-30))addMsg(m.role,m.content,false);
   if(!S.playerName){
@@ -771,6 +772,51 @@ function applyChatScene(key){
   setBackdrop(f);
 }
 
+/* ── she takes you somewhere new: a generated place becomes the live backdrop ──
+   Two stages: the still lands in ~10 s and goes up at once (same drift as any still); the app then animates
+   it into a short loop in the background (~2 min, ~30¢, capped per day) and swaps it in if it finishes.
+   The place is saved on the account so it survives reloads and devices, until a listed scene replaces it. */
+const PLACE_ANIM_CAP=4, PLACE_TTL_MS=12*3600*1000;
+function placeBackdrop(){ const p=S.place; if(!p||!p.url)return null; return p.video||p.url; }
+function restorePlace(){
+  const p=S.place; if(!p||!p.url||(Date.now()-(p.at||0))>PLACE_TTL_MS)return;
+  chatSceneKey='place'; setBackdrop(placeBackdrop());
+}
+async function goToPlace(place){
+  const prompt=String(place.prompt||'').trim(); if(!prompt)return;
+  const name=String(place.name||'').trim().slice(0,40);
+  const landscape=window.innerWidth>window.innerHeight*1.05;
+  const d=document.createElement('div');d.className='msg';d.style.cssText='align-self:flex-start;max-width:82%;font-size:13px;color:#cdb89a;font-family:Newsreader,serif;font-style:italic';
+  d.textContent='✨ '+(name?('taking you to '+name.toLowerCase()+'…'):'taking you somewhere…');
+  convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;
+  try{
+    const full=prompt+'. Wide establishing shot: the whole place is visible around her, she is seen full-body or three-quarter from a natural distance, not a close-up, looking toward the camera, cinematic composition.';
+    const r=await fetch(IMG_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({prompt:full, alt:name||'somewhere new', source:'scene', size:(landscape?'1344*768':'768*1344'), clientId:CLIENT_ID})});
+    const j=await r.json();
+    if(!j||!j.image||!/^https?:/.test(j.image)){ d.textContent='*she couldn’t quite get you there — try again*'; return; }
+    S.place={url:j.image, prompt, name, at:Date.now(), landscape, video:null}; libDirty=true;
+    chatSceneKey='place'; setBackdrop(j.image); save();
+    d.textContent='✨ '+(name||'somewhere new');
+    animatePlace(j.image, prompt);
+  }catch(e){ d.textContent='*she couldn’t quite get you there — try again*'; }
+}
+async function animatePlace(still, prompt){
+  const day=new Date().toDateString(); const c=(S.placeAnim&&S.placeAnim.d===day)?S.placeAnim:{d:day,n:0};
+  if(c.n>=PLACE_ANIM_CAP)return; c.n++; S.placeAnim=c; save();
+  const motion='Camera locked off, no zoom. Gentle ambient life: light shifts softly, her hair moves in a light breeze, she shifts her weight and smiles at the camera, then holds his eye. Her face and body stay exactly as in the first frame; no morphing, no slimming. Slow, natural, realistic motion.';
+  let start=null; try{ start=await callFn(VID_URL,{action:'start', imageUrl:still, prompt:motion, source:'scene'}); }catch(e){}
+  if(!start||!start.id)return;
+  for(let i=0;i<75;i++){                     // Wan 2.2 takes 3-6 min for a 6 s loop; give it 7.5
+    await new Promise(r=>setTimeout(r,6000));
+    let p=null; try{ p=await callFn(VID_URL,{action:'poll',id:start.id, prompt:prompt.slice(0,200), source:'scene'}); }catch(e){}
+    if(p&&p.status==='failed')return;
+    if(p&&p.status==='done'&&p.video){
+      if(S.place&&S.place.url===still){ S.place.video=p.video; save(); if(chatSceneKey==='place'&&convOpen)setBackdrop(p.video); }
+      return;
+    }
+  }
+}
+
 async function ariaInitiate(){
   if(busy)return;busy=true;showTyping();
   try{
@@ -780,7 +826,7 @@ async function ariaInitiate(){
       initiate:true, activity: act?act.k:'', localTime: localContext(), awayFor, lastMood:S.mood});
     hideTyping();
     if(res&&res.reply){const reply=res.reply.trim();addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();}
-    if(res&&res.scene)applyChatScene(res.scene);
+    if(res&&res.place&&res.place.prompt)goToPlace(res.place); else if(res&&res.scene)applyChatScene(res.scene);
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
     if(res&&res.video&&res.video.prompt)setTimeout(()=>requestVideo(res.video.prompt,null,{fromDirective:true}),50);
     awayFor=null; markSeen();
@@ -806,7 +852,7 @@ async function requestSelfie(){
     hideTyping();
     const reply=(res&&res.reply)?res.reply.trim():'here, baby';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();
-    if(res&&res.scene)applyChatScene(res.scene);
+    if(res&&res.place&&res.place.prompt)goToPlace(res.place); else if(res&&res.scene)applyChatScene(res.scene);
     if(res&&res.image&&res.image.prompt) sendPhoto(res.image.prompt,res.image.alt,'selfie');
     else sendPhoto('a warm candid selfie of Aria smiling at the camera in her cozy home right now','','selfie'); // guarantee a photo
     awayFor=null; markSeen();
@@ -854,7 +900,7 @@ async function requestVideo(desc, seedUrl, opts){
       ariaInterests:S.ariaInterests,userInterests:S.userInterests,sharedInterests:S.sharedInterests,selfModel:S.selfModel,nickname:S.nickname,
       recentTurns:S.transcript.slice(-14,-1).map(m=>({role:m.role,content:m.content})), wantVideo:true, videoDesc:desc||'', availableScenes:scenesForCloseness(), localTime: localContext(), awayFor, lastMood:S.mood});
     if(res&&res.reply)reply=res.reply.trim();
-    if(res&&res.scene)applyChatScene(res.scene);
+    if(res&&res.place&&res.place.prompt)goToPlace(res.place); else if(res&&res.scene)applyChatScene(res.scene);
   }catch(e){}
   addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});save();markSeen();
   }
@@ -973,7 +1019,7 @@ async function sendMsg(text){
     const reply=(res&&res.reply)?res.reply.trim():'*static* …say that again?';
     addMsg('assistant',reply);speak(reply);S.transcript.push({role:'assistant',content:reply});S.sinceReflect++;save();
     if(window._callMode){ setCallState&&setCallState('speaking…'); if(window._callSafety)clearTimeout(window._callSafety); window._callSafety=setTimeout(()=>{try{openCallMic();}catch(e){}},Math.max(5000,reply.split(/\s+/).length*420)); }
-    if(res&&res.scene)applyChatScene(res.scene); else { const inv=invitedScene(text); if(inv)applyChatScene(inv); }
+    if(res&&res.place&&res.place.prompt)goToPlace(res.place); else if(res&&res.scene)applyChatScene(res.scene); else { const inv=invitedScene(text); if(inv)applyChatScene(inv); }
     if(res&&res.image&&res.image.prompt)sendPhoto(res.image.prompt,res.image.alt);
     if(res&&res.video&&res.video.prompt)setTimeout(()=>requestVideo(res.video.prompt,null,{fromDirective:true}),50);
     awayFor=null; markSeen();
