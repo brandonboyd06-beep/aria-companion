@@ -115,7 +115,7 @@ async function makeVoiceNote(sb: any, clientId: string, s: any, text: string, so
   try {
     const SUPA = Deno.env.get("SUPABASE_URL")!; const SRK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const v = (s.voice && typeof s.voice === "object") ? s.voice : {};
-    const body: any = { text: text.slice(0, 600), elVoice: v.el || "cgSgspJ2msm6clMCkdW9", model: "eleven_multilingual_v2", style: typeof v.style === "number" ? v.style : 0.6, stability: 0.35, speed: typeof v.speed === "number" ? v.speed : 1.0 };
+    const body: any = { text: text.slice(0, 600), elVoice: v.el || "cgSgspJ2msm6clMCkdW9", model: "eleven_v3", style: typeof v.style === "number" ? v.style : 0.6, stability: 0.5, speed: typeof v.speed === "number" ? v.speed : 1.0 };
     const r = await fetch(`${SUPA}/functions/v1/companion-voice`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SRK, Authorization: `Bearer ${SRK}` }, body: JSON.stringify(body) });
     const j = await r.json();
     const dataUrl = (j && typeof j.audio === "string") ? j.audio : "";

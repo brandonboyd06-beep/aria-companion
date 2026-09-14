@@ -210,7 +210,7 @@ const CHAT=SUPA+"/functions/v1/companion-chat", REFLECT=SUPA+"/functions/v1/comp
 const SAVE_URL=SUPA+"/functions/v1/companion-save", LOAD_URL=SUPA+"/functions/v1/companion-load";
 const IMG_URL=SUPA+"/functions/v1/companion-image";
 const VID_URL=SUPA+"/functions/v1/companion-video";
-const VERSION="2026-09-12.43"; try{console.log("Aria build",VERSION);}catch(e){}
+const VERSION="2026-09-14.44"; try{console.log("Aria build",VERSION);}catch(e){}
 // Aria's ACCOUNT id — one identity that follows you across devices (not per-device).
 // Migrates the legacy per-device id into the account so existing data carries over;
 // linking another device just adopts that device's account id (see linkDevice).
@@ -570,7 +570,7 @@ const conv=document.getElementById('conv'),convChat=document.getElementById('con
   convInput=document.getElementById('convInput'),convForm=document.getElementById('convForm');
 let busy=false,typingEl=null;
 function fmt(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\*([^*]+)\*/g,'<em>$1</em>').replace(/\n+/g,'<br>');}
-function addMsg(role,text,anim=true){const d=document.createElement('div');d.className='msg '+(role==='assistant'?'aria':'you');d.innerHTML=role==='assistant'?fmt(text):text.replace(/&/g,'&amp;').replace(/</g,'&lt;');if(!anim)d.style.animation='none';convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;return d;}
+function addMsg(role,text,anim=true){const d=document.createElement('div');d.className='msg '+(role==='assistant'?'aria':'you');d.innerHTML=role==='assistant'?fmt(stripCues(text)):text.replace(/&/g,'&amp;').replace(/</g,'&lt;');if(!anim)d.style.animation='none';convChat.appendChild(d);convChat.scrollTop=convChat.scrollHeight;return d;}
 function showTyping(){hideTyping();typingEl=document.createElement('div');typingEl.className='typing';typingEl.innerHTML='<span></span><span></span><span></span>';convChat.appendChild(typingEl);convChat.scrollTop=convChat.scrollHeight;}
 function hideTyping(){if(typingEl){typingEl.remove();typingEl=null;}}
 // tap-to-expand lightbox for her photos
@@ -1066,10 +1066,13 @@ function loadVoices(){try{voices=speechSynthesis.getVoices()||[];}catch(e){}}
 if('speechSynthesis' in window){loadVoices();speechSynthesis.onvoiceschanged=loadVoices;}
 function pickVoice(){const en=voices.filter(v=>/^en/i.test(v.lang));const pref=['Samantha','Ava','Allison','Serena','Karen','Victoria','Google US English','Microsoft Aria','Zira'];for(const n of pref){const v=en.find(v=>v.name.includes(n));if(v)return v;}return en[0]||voices[0]||null;}
 function browserSpeak(clean){if(!('speechSynthesis'in window)){window._onVoiceEnd&&window._onVoiceEnd();return;}try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(clean);const v=pickVoice();if(v)u.voice=v;u.rate=0.97;u.pitch=1.06;u.onend=()=>{window._onVoiceEnd&&window._onVoiceEnd();};u.onerror=()=>{window._onVoiceEnd&&window._onVoiceEnd();};speechSynthesis.speak(u);}catch(e){window._onVoiceEnd&&window._onVoiceEnd();}}
-function cleanForVoice(t){return String(t).replace(/\*[^*]*\*/g,' ').replace(/[_*#>`~]/g,'').replace(/\s+/g,' ').trim();}
+// spoken cues: short bracketed tags ([soft], [whispers], [giggles]…) that the v3 engine performs; never shown in a bubble,
+// and stripped for the call engine (turbo), which would read them out loud
+function stripCues(t){return String(t).replace(/\[[a-z][a-z ]{1,18}\]/gi,'').replace(/ {2,}/g,' ').replace(/^\s+/,'');}
+function cleanForVoice(t){const s=String(t).replace(/\*[^*]*\*/g,' ').replace(/[_*#>`~]/g,'').replace(/\s+/g,' ').trim();return window._callMode?stripCues(s):s;}
 function stopVoice(){try{if(voiceSrc){voiceSrc.stop();voiceSrc=null;}}catch(e){}try{if('speechSynthesis'in window)speechSynthesis.cancel();}catch(e){}}
 async function synthAndPlay(text){
-  const r=await fetch(VOICE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({text, elVoice:currentVoice().el, model:(window._callMode?'eleven_turbo_v2_5':'eleven_multilingual_v2'), style:(typeof settings.voiceStyle==='number'?settings.voiceStyle:currentVoice().st), stability:0.35, speed:settings.voiceSpeed||1.0, rpVoice:'English_Soft-spokenGirl'})});
+  const r=await fetch(VOICE_URL,{method:'POST',headers:{'Content-Type':'application/json','apikey':ANON,'Authorization':'Bearer '+ANON},body:JSON.stringify({text, elVoice:currentVoice().el, model:(window._callMode?'eleven_turbo_v2_5':'eleven_v3'), style:(typeof settings.voiceStyle==='number'?settings.voiceStyle:currentVoice().st), stability:(window._callMode?0.35:0.5), speed:settings.voiceSpeed||1.0, rpVoice:'English_Soft-spokenGirl'})});
   const d=await r.json();
   if(d&&d.audio){
     ensureCtx();
@@ -1196,17 +1199,13 @@ async function linkDevice(code){
 /* ── voice picker: audition & choose how she sounds ── */
 // ElevenLabs voices (the app runs on ElevenLabs; el = voice id, st = style, sp = speed)
 const VOICES=[
+  // 2026-09-14: trimmed to the three Brandon chose from a twenty-voice v3 audition; chat + voice notes run on eleven_v3
   {id:'jessica',  el:'cgSgspJ2msm6clMCkdW9', st:0.6,  sp:1.0,  label:'Jessica · playful &amp; flirty'},
-  {id:'charlotte',el:'XB0fDUnXU5powFXDhCwa', st:0.55, sp:0.97, label:'Charlotte · seductive'},
-  {id:'laura',    el:'FGY2WhTYpPnrIDTdsKH5', st:0.6,  sp:1.0,  label:'Laura · upbeat &amp; cheeky'},
-  {id:'freya',    el:'jsCqWAovK2LkecY7zXl4', st:0.55, sp:1.0,  label:'Freya · bold &amp; expressive'},
-  {id:'nicole',   el:'piTKgcLEGmPE4e6mEKli', st:0.45, sp:0.95, label:'Nicole · breathy whisper'},
-  {id:'lily',     el:'pFZP5JQG7iQjIQuC4Bku', st:0.5,  sp:0.97, label:'Lily · velvety, British'},
-  {id:'matilda',  el:'XrExE9yKIg1WjnnlVkGX', st:0.5,  sp:1.0,  label:'Matilda · warm &amp; sweet'},
-  {id:'sarah',    el:'EXAVITQu4vr4xnSDxMaL', st:0.4,  sp:1.0,  label:'Sarah · the original'},
+  {id:'gigi',     el:'jBpfuIE2acCO8z3wKNLl', st:0.6,  sp:1.0,  label:'Gigi · bright &amp; sweet'},
+  {id:'mimi',     el:'zrHiDhphv9ZnVXBqCLjz', st:0.6,  sp:1.0,  label:'Mimi · soft &amp; airy'},
 ];
 function currentVoice(){ return VOICES.find(v=>v.id===settings.voiceId)||VOICES[0]; }
-const VOICE_SAMPLES=["Mm… there you are. I was hoping you'd come find me.","Come here. I've missed the sound of your voice.","Stay a while. I like it when it's just us."];
+const VOICE_SAMPLES=["[soft] Mm… there you are. [whispers] I was hoping you'd come find me.","[soft] Come here. I've missed the sound of your voice.","[giggles] Stay a while. [whispers] I like it when it's just us."];
 let sampleIdx=0;
 function renderVoices(){
   const box=document.getElementById('voicePicker'); if(!box)return; box.innerHTML='';
